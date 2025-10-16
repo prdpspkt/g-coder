@@ -50,8 +50,16 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  /**
+   * Get all tools except internal ones (like TodoWrite)
+   */
+  getPublicTools(): Tool[] {
+    return this.getAll().filter(tool => tool.definition.name !== 'TodoWrite');
+  }
+
   getDefinitions(): string {
-    const tools = this.getAll();
+    // Only show public tools to AI
+    const tools = this.getPublicTools();
     return tools
       .map((tool) => {
         const params = tool.definition.parameters

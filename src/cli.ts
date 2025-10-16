@@ -416,8 +416,8 @@ ${chalk.cyan.bold('Examples:')}
 
       // Check if provider supports native tool calling
       if (this.provider.supportsNativeTools) {
-        // Get tools for provider
-        const allTools = toolRegistry.getAll();
+        // Get public tools for provider (excludes internal tools like TodoWrite)
+        const allTools = toolRegistry.getPublicTools();
         let providerTools: any[] = [];
 
         if (configManager.get().provider === 'openai' || configManager.get().provider === 'deepseek') {

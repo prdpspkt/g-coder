@@ -16,7 +16,7 @@ const TODO_FILE = path.join(os.tmpdir(), 'g-coder-todos.json');
 export class TodoWriteTool implements Tool {
   definition: ToolDefinition = {
     name: 'TodoWrite',
-    description: 'Create and manage a task list to track progress on complex multi-step tasks',
+    description: 'INTERNAL USE ONLY - Do NOT use this tool. This is for the AI assistant to track its own internal task progress, not for creating user todo files. For user todo lists, use file artifacts instead.',
     parameters: [
       {
         name: 'todos',
