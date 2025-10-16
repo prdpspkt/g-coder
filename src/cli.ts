@@ -12,6 +12,7 @@ import { sessionManager } from './utils/session';
 import { toOpenAITools, toAnthropicTools } from './tools/converter';
 import { ApprovalManager } from './utils/approval';
 import { PlatformDetector } from './utils/platform';
+import { ProjectScanner } from './utils/project-scanner';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -26,6 +27,7 @@ export class CLI {
   private approvalManager: ApprovalManager;
   private currentTask: string = '';
   private statusInterval: NodeJS.Timeout | null = null;
+  private projectScanned: boolean = false;
 
   constructor() {
     const config = configManager.get();
@@ -307,6 +309,24 @@ export class CLI {
         console.log(renderer.renderSuccess('Reloaded commands and hooks'));
         break;
 
+      case 'rescan':
+        {
+          const scanSpinner = ora('Rescanning project...').start();
+          try {
+            ProjectScanner.clearCache();
+            const projectInfo = await ProjectScanner.scan();
+            const projectContext = ProjectScanner.formatAsContext(projectInfo);
+
+            scanSpinner.succeed(`Project rescanned: ${projectInfo.name} (${projectInfo.type})`);
+            console.log(chalk.cyan('\nProject Information:'));
+            console.log(projectContext);
+          } catch (error: any) {
+            scanSpinner.fail('Failed to rescan project');
+            console.log(renderer.renderError(error.message));
+          }
+        }
+        break;
+
       case 'model':
         if (args.length > 0) {
           const newModel = args.join(' ');
@@ -565,6 +585,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/commands')}   - List custom slash commands
   ${chalk.yellow('/hooks')}      - Show configured hooks
   ${chalk.yellow('/reload')}     - Reload commands and hooks
+  ${chalk.yellow('/rescan')}     - Rescan project structure and context
   ${chalk.yellow('/model')}      - Show or change current model
   ${chalk.yellow('/provider')}   - Show or change AI provider
   ${chalk.yellow('/config')}     - Show current configuration
@@ -608,6 +629,28 @@ ${chalk.cyan.bold('Examples:')}
     this.updateStatus('Processing your request...');
 
     try {
+      // Scan project on first user input
+      if (!this.projectScanned) {
+        this.updateStatus('Scanning project...');
+        const scanSpinner = ora('Analyzing project structure...').start();
+
+        try {
+          const projectInfo = await ProjectScanner.scan();
+          const projectContext = ProjectScanner.formatAsContext(projectInfo);
+
+          // Add project context to the conversation
+          this.context.addMessage('user', `${projectContext}\n\nPlease keep this project context in mind for all future questions and responses.`);
+          this.context.addMessage('assistant', `I understand. I'm now working on the ${projectInfo.name} project (${projectInfo.type}). I'll use this context to provide more relevant assistance.`);
+
+          scanSpinner.succeed(`Project scanned: ${projectInfo.name} (${projectInfo.type})`);
+          this.projectScanned = true;
+        } catch (error: any) {
+          scanSpinner.fail('Failed to scan project');
+          logger.warn('Project scan failed:', error.message);
+          this.projectScanned = true; // Don't try again
+        }
+      }
+
       // Trigger user prompt submit hook
       const hookResult = await hookManager.trigger({
         event: 'user_prompt_submit',

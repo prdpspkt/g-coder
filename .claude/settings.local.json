@@ -18,7 +18,8 @@
       "Bash(findstr:*)",
       "Bash(git push)",
       "Bash(git push:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(set:*)"
     ],
     "deny": [],
     "ask": []

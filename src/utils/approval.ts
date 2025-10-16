@@ -57,7 +57,13 @@ export class ApprovalManager {
       return false;
     }
 
-    return this.config.toolsRequiringApproval[toolName] === true;
+    // If the tool is explicitly configured, use that setting
+    if (toolName in this.config.toolsRequiringApproval) {
+      return this.config.toolsRequiringApproval[toolName] === true;
+    }
+
+    // By default, require approval for all tools when approval is enabled
+    return true;
   }
 
   /**
@@ -421,18 +427,20 @@ export class ApprovalManager {
  */
 export function createDefaultApprovalConfig(): ApprovalConfig {
   return {
-    enabled: false,
+    enabled: true,
     toolsRequiringApproval: {
       Bash: true,
       Write: true,
       Edit: true,
       GitCommit: true,
       GitPush: true,
-      WebFetch: false,
-      Read: false,
-      Glob: false,
-      Grep: false,
+      WebFetch: true,
+      Read: true,
+      Glob: true,
+      Grep: true,
       EditNotebook: true,
+      TodoWrite: true,
+      // Add all tools to require approval by default
     },
     autoApprovePatterns: [],
   };

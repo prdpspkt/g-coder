@@ -5,8 +5,12 @@ import * as dotenv from 'dotenv';
 import { ProviderType } from '../providers/types';
 import { ApprovalConfig, createDefaultApprovalConfig } from './approval';
 
-// Load environment variables from .env file
-dotenv.config();
+const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const ENV_FILE = path.join(CONFIG_DIR, '.env');
+
+// Load environment variables from .env file in ~/.g-coder
+dotenv.config({ path: ENV_FILE });
 
 export interface Config {
   provider: ProviderType;
@@ -29,10 +33,6 @@ export interface Config {
   // Execution approval settings
   approval?: ApprovalConfig;
 }
-
-const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
-const ENV_FILE = path.join(CONFIG_DIR, '.env');
 
 // Helper function removed - system prompt now comes from config.json file only
 
