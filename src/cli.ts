@@ -10,6 +10,8 @@ import { hookManager } from './utils/hooks';
 import { artifactParser } from './utils/artifact-parser';
 import { sessionManager } from './utils/session';
 import { toOpenAITools, toAnthropicTools } from './tools/converter';
+import { ApprovalManager } from './utils/approval';
+import { PlatformDetector } from './utils/platform';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -21,6 +23,9 @@ export class CLI {
   private planMode: boolean = false;
   private pendingPlan: string | null = null;
   private currentSessionId: string | null = null;
+  private approvalManager: ApprovalManager;
+  private currentTask: string = '';
+  private statusInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     const config = configManager.get();
@@ -41,6 +46,10 @@ export class CLI {
       enableTokenShortening: config.enableTokenShortening,
       modelName: config.model,
     });
+
+    // Initialize approval manager with config
+    const approvalConfig = configManager.getApprovalConfig();
+    this.approvalManager = new ApprovalManager(approvalConfig);
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -142,9 +151,11 @@ export class CLI {
       }
 
       if (this.isProcessing) {
-        console.log(renderer.renderWarning('Please wait for the current request to complete'));
-        this.rl.prompt();
-        return;
+        // Input blocked during processing - show current task
+        process.stdout.write('\r\x1b[K'); // Clear current line
+        console.log(renderer.renderWarning(`Agent is busy: ${this.currentTask || 'Processing...'}`));
+        this.showStatusLine();
+        return; // Don't show prompt during processing
       }
 
       // Handle commands
@@ -169,6 +180,50 @@ export class CLI {
       await hookManager.trigger({ event: 'session_end' });
       process.exit(0);
     });
+  }
+
+  /**
+   * Pause readline input during processing
+   */
+  private pauseInput(): void {
+    this.rl.pause();
+  }
+
+  /**
+   * Resume readline input after processing
+   */
+  private resumeInput(): void {
+    this.rl.resume();
+  }
+
+  /**
+   * Update the current task and display status
+   */
+  private updateStatus(task: string): void {
+    this.currentTask = task;
+    this.showStatusLine();
+  }
+
+  /**
+   * Show status line above the prompt
+   */
+  private showStatusLine(): void {
+    if (!this.currentTask) return;
+
+    // Move cursor up, clear line, show status, move back
+    const statusLine = chalk.bgBlue.white(` ⚙ ${this.currentTask} `);
+    process.stdout.write(`\r\x1b[K${statusLine}\n`);
+  }
+
+  /**
+   * Clear status line
+   */
+  private clearStatusLine(): void {
+    this.currentTask = '';
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+      this.statusInterval = null;
+    }
   }
 
   private async handleCommand(command: string): Promise<void> {
@@ -404,6 +459,95 @@ export class CLI {
         }
         break;
 
+      case 'approval':
+        if (args.length === 0) {
+          // Show approval status
+          const approvalConfig = this.approvalManager.getConfig();
+          const platformInfo = this.approvalManager.getPlatformInfo();
+
+          console.log(renderer.renderHeader('Execution Approval Settings'));
+          console.log(renderer.renderInfo(`Status: ${approvalConfig.enabled ? chalk.green('enabled') : chalk.red('disabled')}`));
+          console.log(renderer.renderInfo(`Platform: ${chalk.cyan(PlatformDetector.getDescription(platformInfo))}`));
+          console.log(chalk.gray(`  Detected ${platformInfo.dangerousPatterns.length} dangerous patterns for your OS`));
+
+          if (approvalConfig.enabled) {
+            console.log(chalk.cyan('\nTools requiring approval:'));
+            Object.entries(approvalConfig.toolsRequiringApproval).forEach(([tool, required]) => {
+              if (required) {
+                console.log(chalk.yellow(`  ✓ ${tool}`));
+              }
+            });
+
+            const stats = this.approvalManager.getStatistics();
+            if (stats.total > 0) {
+              console.log(chalk.cyan('\nApproval Statistics:'));
+              console.log(chalk.gray(`  Total requests: ${stats.total}`));
+              console.log(chalk.green(`  Approved: ${stats.approved}`));
+              console.log(chalk.red(`  Declined: ${stats.declined}`));
+            }
+          }
+
+          console.log(chalk.gray('\nUsage:'));
+          console.log(chalk.gray('  /approval on    - Enable execution approval'));
+          console.log(chalk.gray('  /approval off   - Disable execution approval'));
+          console.log(chalk.gray('  /approval reset - Reset auto-approve patterns'));
+          console.log(chalk.gray('  /approval stats - Show approval statistics'));
+        } else {
+          const subCmd = args[0].toLowerCase();
+
+          switch (subCmd) {
+            case 'on':
+            case 'enable':
+              configManager.setApprovalEnabled(true);
+              this.approvalManager.updateConfig({ enabled: true });
+              console.log(renderer.renderSuccess('Execution approval enabled'));
+              console.log(renderer.renderInfo('You will be prompted before dangerous operations'));
+              break;
+
+            case 'off':
+            case 'disable':
+              configManager.setApprovalEnabled(false);
+              this.approvalManager.updateConfig({ enabled: false });
+              console.log(renderer.renderInfo('Execution approval disabled'));
+              console.log(renderer.renderWarning('Tools will execute without confirmation'));
+              break;
+
+            case 'reset':
+              this.approvalManager.resetAutoApprove();
+              console.log(renderer.renderSuccess('Auto-approve patterns cleared'));
+              break;
+
+            case 'stats':
+            case 'statistics':
+              const stats = this.approvalManager.getStatistics();
+              console.log(renderer.renderHeader('Approval Statistics'));
+              console.log(chalk.cyan(`Total requests: ${stats.total}`));
+              console.log(chalk.green(`Approved: ${stats.approved}`));
+              console.log(chalk.red(`Declined: ${stats.declined}`));
+
+              if (Object.keys(stats.byTool).length > 0) {
+                console.log(chalk.cyan('\nBy Tool:'));
+                Object.entries(stats.byTool).forEach(([tool, counts]) => {
+                  console.log(chalk.yellow(`  ${tool}:`));
+                  console.log(chalk.green(`    Approved: ${counts.approved}`));
+                  console.log(chalk.red(`    Declined: ${counts.declined}`));
+                });
+              }
+              break;
+
+            case 'clear':
+            case 'clear-history':
+              this.approvalManager.clearHistory();
+              console.log(renderer.renderSuccess('Approval history cleared'));
+              break;
+
+            default:
+              console.log(renderer.renderError(`Unknown approval subcommand: ${subCmd}`));
+              console.log(renderer.renderInfo('Use: on, off, reset, stats, or clear'));
+          }
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -428,6 +572,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/plan')}       - Toggle plan mode (requires approval before execution)
   ${chalk.yellow('/approve')} or ${chalk.yellow('/yes')} - Approve pending plan
   ${chalk.yellow('/reject')} or ${chalk.yellow('/no')}  - Reject pending plan
+  ${chalk.yellow('/approval')}   - Manage execution approval settings (on/off/stats)
   ${chalk.yellow('exit')} or ${chalk.yellow('quit')} - Exit the application
 
 ${chalk.cyan.bold('Session Management:')}
@@ -459,6 +604,8 @@ ${chalk.cyan.bold('Examples:')}
 
   private async processUserInput(input: string): Promise<void> {
     this.isProcessing = true;
+    this.pauseInput();
+    this.updateStatus('Processing your request...');
 
     try {
       // Trigger user prompt submit hook
@@ -492,6 +639,7 @@ ${chalk.cyan.bold('Examples:')}
       console.log(''); // New line before response
 
       // Show spinner while AI is thinking
+      this.updateStatus('AI is thinking...');
       const thinkingSpinner = ora('AI is processing your request...').start();
 
       // Stream response from provider (silent, no console output)
@@ -586,6 +734,7 @@ ${chalk.cyan.bold('Examples:')}
         }
 
         // Execute tools in parallel
+        this.updateStatus(`Executing ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`);
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
         const toolPromises = toolCalls.map(async (toolCall) => {
@@ -616,6 +765,22 @@ ${chalk.cyan.bold('Examples:')}
               toolCall,
               result: { success: false, error: 'Blocked by hook' },
             };
+          }
+
+          // Check if tool requires approval
+          if (this.approvalManager.requiresApproval(toolCall.name)) {
+            const approvalResult = await this.approvalManager.promptForApproval({
+              toolName: toolCall.name,
+              params: toolCall.params,
+            });
+
+            if (!approvalResult.approved) {
+              console.log(renderer.renderWarning(`Tool ${toolCall.name} execution cancelled`));
+              return {
+                toolCall,
+                result: { success: false, error: approvalResult.reason || 'User declined' },
+              };
+            }
           }
 
           const result = await toolRegistry.executeTool(toolCall.name, toolCall.params);
@@ -661,6 +826,7 @@ ${chalk.cyan.bold('Examples:')}
           // Get AI response to all tool results
           const followUpMessages = this.context.getAIMessages();
 
+          this.updateStatus('AI analyzing tool results...');
           const followUpSpinner = ora('AI analyzing tool results...').start();
 
           let followUpResponse: string;
@@ -721,6 +887,8 @@ ${chalk.cyan.bold('Examples:')}
       logger.error('Error processing input:', error);
     } finally {
       this.isProcessing = false;
+      this.clearStatusLine();
+      this.resumeInput();
     }
   }
 

@@ -2,11 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Tool, ToolDefinition, ToolResult } from './types';
 import { logger } from '../utils/logger';
+import { SmartEdit } from '../utils/smart-edit';
 
 export class EditTool implements Tool {
   definition: ToolDefinition = {
     name: 'Edit',
-    description: 'Performs exact string replacements in a file',
+    description: 'Intelligently finds and modifies code in a file. Supports multiple matching strategies: exact match, fuzzy matching, line numbers, and context-based matching.',
     parameters: [
       {
         name: 'file_path',
@@ -17,14 +18,20 @@ export class EditTool implements Tool {
       {
         name: 'old_string',
         type: 'string',
-        description: 'The exact string to replace',
+        description: 'The code/text to find and replace. Can be a partial match, full line, or multi-line block.',
         required: true,
       },
       {
         name: 'new_string',
         type: 'string',
-        description: 'The string to replace it with',
+        description: 'The replacement code/text',
         required: true,
+      },
+      {
+        name: 'line_number',
+        type: 'number',
+        description: 'Optional: Specific line number to edit (1-based index)',
+        required: false,
       },
       {
         name: 'replace_all',
@@ -37,7 +44,7 @@ export class EditTool implements Tool {
   };
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
-    const { file_path, old_string, new_string, replace_all = false } = params;
+    const { file_path, old_string, new_string, line_number, replace_all = false } = params;
 
     try {
       if (!file_path) {
@@ -70,31 +77,21 @@ export class EditTool implements Tool {
         };
       }
 
-      let content = fs.readFileSync(resolvedPath, 'utf-8');
+      const originalContent = fs.readFileSync(resolvedPath, 'utf-8');
 
-      // Check if old_string exists
-      if (!content.includes(old_string)) {
+      // Use SmartEdit to find and replace intelligently
+      const editResult = SmartEdit.edit(originalContent, old_string, new_string, {
+        replaceAll: replace_all,
+        lineNumber: line_number,
+        fuzzyMatch: true,
+        contextLines: 3,
+      });
+
+      if (!editResult.success) {
         return {
           success: false,
-          error: `String not found in file: "${old_string.substring(0, 50)}${old_string.length > 50 ? '...' : ''}"`,
+          error: editResult.error || 'Failed to edit file',
         };
-      }
-
-      // Count occurrences
-      const occurrences = (content.match(new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-
-      if (occurrences > 1 && !replace_all) {
-        return {
-          success: false,
-          error: `String appears ${occurrences} times in file. Use replace_all: true to replace all occurrences, or provide a more specific string.`,
-        };
-      }
-
-      // Perform replacement
-      if (replace_all) {
-        content = content.split(old_string).join(new_string);
-      } else {
-        content = content.replace(old_string, new_string);
       }
 
       // Safety warnings
@@ -117,14 +114,34 @@ export class EditTool implements Tool {
         warnings.push(`⚠️  Modifying potentially sensitive file: ${fileName}`);
       }
 
-      fs.writeFileSync(resolvedPath, content, 'utf-8');
+      // Write the edited content
+      fs.writeFileSync(resolvedPath, editResult.content!, 'utf-8');
 
-      const replacedCount = replace_all ? occurrences : 1;
-      logger.tool('Edit', `Replaced ${replacedCount} occurrence(s) in ${file_path}`);
+      const linesChanged = editResult.linesChanged || 1;
+      const strategyUsed = editResult.strategy || 'unknown';
 
-      let output = `Successfully replaced ${replacedCount} occurrence(s) in ${resolvedPath}`;
+      logger.tool('Edit', `Modified ${linesChanged} line(s) in ${file_path} using ${strategyUsed} strategy`);
+
+      // Build detailed output message
+      let output = `Successfully edited ${resolvedPath}\n`;
+      output += `Strategy: ${strategyUsed}\n`;
+      output += `Lines modified: ${linesChanged}`;
+
+      if (editResult.startLine && editResult.endLine) {
+        output += `\nLine range: ${editResult.startLine}-${editResult.endLine}`;
+
+        // Show preview of the changes
+        const preview = SmartEdit.getLinePreview(
+          editResult.content!,
+          editResult.startLine,
+          editResult.endLine,
+          2
+        );
+        output += '\n\nPreview:\n' + preview;
+      }
+
       if (warnings.length > 0) {
-        output += '\n' + warnings.join('\n');
+        output += '\n\n' + warnings.join('\n');
       }
 
       return {
@@ -132,7 +149,10 @@ export class EditTool implements Tool {
         output,
         data: {
           path: resolvedPath,
-          replacedCount,
+          linesChanged,
+          startLine: editResult.startLine,
+          endLine: editResult.endLine,
+          strategy: strategyUsed,
           warnings: warnings.length,
         },
       };

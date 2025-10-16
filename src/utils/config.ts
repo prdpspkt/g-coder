@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as dotenv from 'dotenv';
 import { ProviderType } from '../providers/types';
+import { ApprovalConfig, createDefaultApprovalConfig } from './approval';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -24,6 +25,9 @@ export interface Config {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
+
+  // Execution approval settings
+  approval?: ApprovalConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
@@ -142,6 +146,7 @@ const DEFAULT_CONFIG: Config = {
   enableTokenShortening: true,
   ollamaUrl: 'http://localhost:11434',
   systemPrompt: getDefaultSystemPrompt(),
+  approval: createDefaultApprovalConfig(),
 };
 
 export class ConfigManager {
@@ -285,6 +290,38 @@ export class ConfigManager {
     if (provider === 'anthropic') return this.config.anthropicApiKey;
     if (provider === 'deepseek') return this.config.deepseekApiKey;
     return undefined;
+  }
+
+  // Approval configuration methods
+  getApprovalConfig(): ApprovalConfig {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    return { ...this.config.approval };
+  }
+
+  setApprovalEnabled(enabled: boolean): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval.enabled = enabled;
+    this.saveConfig(this.config);
+  }
+
+  updateApprovalConfig(partial: Partial<ApprovalConfig>): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval = { ...this.config.approval, ...partial };
+    this.saveConfig(this.config);
+  }
+
+  setToolApproval(toolName: string, requiresApproval: boolean): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval.toolsRequiringApproval[toolName] = requiresApproval;
+    this.saveConfig(this.config);
   }
 }
 
