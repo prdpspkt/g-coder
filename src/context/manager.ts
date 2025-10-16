@@ -79,19 +79,32 @@ ${toolsDescription}
 
 # File Creation - PREFERRED METHOD (Artifacts)
 
-When creating or updating files, use file artifacts instead of Write tool:
+IMPORTANT: Always use file artifacts for creating/updating files. DO NOT use Write tool.
 
+Format: \`\`\`<language> <filepath>
+
+Example:
 \`\`\`javascript src/example.js
 function hello() {
   console.log("Hello World");
 }
 \`\`\`
 
-Format: \`\`\`<language> <filepath>
-- Files are written automatically to disk
-- No need to use Write tool
-- Show concise progress messages instead of streaming full file contents
-- Supports: .ts .js .tsx .jsx .py .java .cpp .c .h .css .html .json .md .txt .sh .yml .yaml .xml .go .rs .rb .php .sql .env
+Example for text files:
+\`\`\`txt todolist.txt
+TODO LIST
+=========
+1. First task
+2. Second task
+3. Third task
+\`\`\`
+
+Rules:
+- Write COMPLETE file content in one artifact block
+- Include ALL lines - don't truncate or abbreviate
+- Files are automatically written to disk from the artifact
+- Never use Write tool - always use artifacts for file creation
+- Supported extensions: .ts .js .tsx .jsx .py .java .cpp .c .h .css .html .json .md .txt .sh .yml .yaml .xml .go .rs .rb .php .sql .env
 
 # Tool Usage (For operations other than file creation)
 

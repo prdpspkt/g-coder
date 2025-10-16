@@ -11,7 +11,9 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nImplement Claude-like artifact system for file creation\n\nMajor improvements to file creation workflow:\n- Created artifact parser to detect code blocks with file paths\n- Files now stream directly to disk from AI responses\n- Console shows concise progress instead of full file contents\n- Prevents truncation and incomplete files\n- Updated system prompt to guide AI on artifact usage\n- Format: ```language filepath for automatic file creation\n\nThis solves the problem where files created via Write tool were incomplete\nor truncated. Now files are complete and written directly as artifacts.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(npm ls:*)",
       "Bash(npm install:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Read(//c/Users/Acer/.g-coder/**)",
+      "Bash(npm version:*)"
     ],
     "deny": [],
     "ask": []
