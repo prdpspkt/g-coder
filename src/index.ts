@@ -11,13 +11,13 @@ const program = new Command();
 
 program
   .name('g-coder')
-  .description('AI-powered CLI coding assistant powered by Ollama')
+  .description('AI-powered CLI')
   .version('1.0.0');
 
 program
   .command('start')
   .description('Start the interactive coding assistant')
-  .option('-m, --model <model>', 'Ollama model to use')
+  .option('-m, --model <model>', 'Ollama models to use:')
   .option('-v, --verbose', 'Enable verbose logging')
   .action(async (options) => {
     if (options.verbose) {
