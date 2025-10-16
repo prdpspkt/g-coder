@@ -19,6 +19,8 @@ export class DeepSeekProvider implements AIProvider {
     this.client = new OpenAI({
       apiKey,
       baseURL: 'https://api.deepseek.com/v1',
+      timeout: 600000, // 10 minutes for large file generation
+      maxRetries: 2,
     });
     this.model = model;
     this.temperature = temperature;
