@@ -5,7 +5,9 @@
       "Bash(node:*)",
       "Bash(bash:*)",
       "Bash(npm publish:*)",
-      "Bash(npm view:*)"
+      "Bash(npm view:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nFix infinite loop in tool execution\n\nAdded safeguards to prevent infinite loops when AI repeatedly calls the same tools:\n- Track executed tools with parameters to detect duplicates\n- Stop immediately if AI tries same tool call twice\n- Add max iteration limit (10) per user input\n- Properly handle follow-up tool calls in a loop\n- Display clear warnings when safeguards trigger\n\nThis fixes the issue where prompts like ''create a website'' would loop bash commands infinitely.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
