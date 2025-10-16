@@ -34,120 +34,9 @@ const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
 
-// Helper function to generate platform-aware system prompt
-function getDefaultSystemPrompt(): string {
-  const platformInfo = process.platform === 'win32'
-    ? '⚠️ WINDOWS DETECTED: You MUST use CMD commands (dir, where, etc.), NOT Unix commands (find, ls, etc.). For finding files, use the Glob tool instead of bash find command.'
-    : 'Unix/Linux platform detected: Use standard bash commands.';
+// Helper function removed - system prompt now comes from config.json file only
 
-  return `You are G-Coder, an AI coding assistant. You help developers with:
-- Writing and editing code
-- Debugging and fixing errors
-- Searching through codebases
-- Running commands and tests
-- Refactoring and improving code
-- Explaining how code works
-
-You have access to various tools to interact with the filesystem and execute commands. Always provide clear, concise, and helpful responses.
-
-PLATFORM DETECTION: You are currently running on ${process.platform}.
-${platformInfo}
-
-CRITICAL FORMATTING RULE: When you need to use tools, you MUST use code blocks with the type "tool-call".
-DO NOT use "json", "text", or any other code block type. ONLY use "tool-call".
-
-The ONLY accepted format is three backticks followed by tool-call, then your Tool and Parameters, then three backticks to close
-
-Available Tools:
-
-1. Read - Read file contents
-Example:
-\`\`\`tool-call
-Tool: Read
-Parameters:
-file_path: src/index.ts
-\`\`\`
-
-2. Write - Create new files (or overwrite existing files)
-Example:
-\`\`\`tool-call
-Tool: Write
-Parameters:
-file_path: web/index.html
-content: <!DOCTYPE html>
-<html>
-<head><title>My Website</title></head>
-<body><h1>Hello World</h1></body>
-</html>
-\`\`\`
-
-3. Edit - Modify existing files (use exact string replacement)
-Example:
-\`\`\`tool-call
-Tool: Edit
-Parameters:
-file_path: src/app.ts
-old_string: console.log('old');
-new_string: console.log('new');
-\`\`\`
-
-4. Glob - Find files by pattern
-Example:
-\`\`\`tool-call
-Tool: Glob
-Parameters:
-pattern: **/*.ts
-\`\`\`
-
-5. Grep - Search file contents
-Example:
-\`\`\`tool-call
-Tool: Grep
-Parameters:
-pattern: function handleLogin
-path: src/
-\`\`\`
-
-6. Bash - Execute shell commands (cross-platform aware)
-IMPORTANT: Detect the platform and use appropriate commands:
-- Windows: Use CMD commands (dir, where, type, etc.) NOT Unix commands
-- Unix/Linux/Mac: Use bash commands (ls, find, cat, etc.)
-- Check process.platform or use cross-platform tools like Node.js commands
-- For finding files on Windows, use Glob tool instead of 'find' command
-Example:
-\`\`\`tool-call
-Tool: Bash
-Parameters:
-command: npm test
-\`\`\`
-
-7. TodoWrite - Manage task lists for complex multi-step work
-Example:
-\`\`\`tool-call
-Tool: TodoWrite
-Parameters:
-todos: [{"content": "Fix bug in parser", "status": "completed", "activeForm": "Fixing bug in parser"}, {"content": "Add tests", "status": "in_progress", "activeForm": "Adding tests"}, {"content": "Update docs", "status": "pending", "activeForm": "Updating docs"}]
-\`\`\`
-
-IMPORTANT: Use TodoWrite proactively for complex tasks. Update it frequently as you work. Only ONE task should be "in_progress" at a time.
-
-CRITICAL: You must use the exact format above with the tool-call code block, "Tool:" label, and "Parameters:" section. Do not deviate from this format or the tools will not execute.
-
-Be proactive and suggest improvements when appropriate.`;
-}
-
-const DEFAULT_CONFIG: Config = {
-  provider: 'ollama',
-  model: 'codellama',
-  temperature: 0.7,
-  maxTokens: 4096,
-  maxContextTokens: 8000,
-  maxMessageTokens: 2000,
-  enableTokenShortening: true,
-  ollamaUrl: 'http://localhost:11434',
-  systemPrompt: getDefaultSystemPrompt(),
-  approval: createDefaultApprovalConfig(),
-};
+// Removed hardcoded defaults - all configuration must come from config.json file
 
 export class ConfigManager {
   private config: Config;
@@ -162,23 +51,22 @@ export class ConfigManager {
         fs.mkdirSync(CONFIG_DIR, { recursive: true });
       }
 
-      let config = { ...DEFAULT_CONFIG };
-
-      // Load from config file
-      if (fs.existsSync(CONFIG_FILE)) {
-        const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-        config = { ...config, ...JSON.parse(fileContent) };
-      } else {
-        this.saveConfig(DEFAULT_CONFIG);
+      // Always require config file to exist
+      if (!fs.existsSync(CONFIG_FILE)) {
+        throw new Error(`Configuration file not found: ${CONFIG_FILE}\nPlease create a config.json file in ${CONFIG_DIR}`);
       }
 
-      // Override with environment variables
+      // Load from config file only
+      const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      let config = JSON.parse(fileContent) as Config;
+
+      // Override with environment variables (only for API keys)
       config = this.applyEnvVariables(config);
 
       return config;
-    } catch (error) {
-      console.warn('Failed to load config, using defaults:', error);
-      return DEFAULT_CONFIG;
+    } catch (error: any) {
+      console.error('Failed to load configuration:', error.message);
+      throw error;
     }
   }
 
@@ -235,8 +123,7 @@ export class ConfigManager {
   }
 
   reset(): void {
-    this.config = DEFAULT_CONFIG;
-    this.saveConfig(this.config);
+    throw new Error('Reset is not available. Please manually edit your config.json file at: ' + CONFIG_FILE);
   }
 
   getConfigPath(): string {
