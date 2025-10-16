@@ -127,9 +127,10 @@ After using a tool, you'll receive the result and can continue the conversation.
 4. For finding files: Use Glob tool
 5. For searching code: Use Grep tool
 6. For bash commands: Use Bash tool
-7. Before creating directories: Check if they exist using Bash tool (e.g., "test -d dirname && echo exists || echo not exists")
-8. Always provide clear, concise explanations
-9. Don't stream entire file contents to console - write them as artifacts`;
+7. Before implementing features: Search codebase to check if feature already exists (use Grep/Glob tools)
+8. Before creating directories: Check if they exist using Bash tool (e.g., "test -d dirname && echo exists || echo not exists")
+9. Always provide clear, concise explanations
+10. Don't stream entire file contents to console - write them as artifacts`;
   }
 
   private trimContext(): void {
