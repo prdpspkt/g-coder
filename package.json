@@ -1,6 +1,6 @@
 {
   "name": "@prdpspkt/g-coder",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "AI-powered CLI coding assistant supporting Ollama, OpenAI, Claude, DeepSeek and more",
   "main": "dist/index.js",
   "bin": {

@@ -8,6 +8,7 @@ import { logger } from './utils/logger';
 import { commandManager } from './utils/commands';
 import { hookManager } from './utils/hooks';
 import { artifactParser } from './utils/artifact-parser';
+import { sessionManager } from './utils/session';
 import { toOpenAITools, toAnthropicTools } from './tools/converter';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -19,6 +20,7 @@ export class CLI {
   private isProcessing: boolean = false;
   private planMode: boolean = false;
   private pendingPlan: string | null = null;
+  private currentSessionId: string | null = null;
 
   constructor() {
     const config = configManager.get();
@@ -326,6 +328,82 @@ export class CLI {
         }
         break;
 
+      case 'save':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name'));
+          console.log(renderer.renderInfo('Usage: /save <session-name>'));
+        } else {
+          const sessionName = args.join(' ');
+          const messages = this.context.getMessages();
+          const config = configManager.get();
+          const session = sessionManager.saveSession(sessionName, messages, config.provider, config.model);
+          this.currentSessionId = session.id;
+          console.log(renderer.renderSuccess(`Session saved: ${session.name}`));
+          console.log(renderer.renderInfo(`${session.metadata.messageCount} messages saved`));
+        }
+        break;
+
+      case 'load':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name or ID'));
+          console.log(renderer.renderInfo('Usage: /load <session-name-or-id>'));
+        } else {
+          const identifier = args.join(' ');
+          const session = sessionManager.loadSession(identifier);
+          if (session) {
+            this.context.clear();
+            session.messages.forEach(msg => {
+              this.context.addMessage(msg.role as 'user' | 'assistant', msg.content);
+            });
+            this.currentSessionId = session.id;
+            console.log(renderer.renderSuccess(`Session loaded: ${session.name}`));
+            console.log(renderer.renderInfo(`${session.metadata.messageCount} messages restored`));
+            if (session.metadata.provider) {
+              console.log(renderer.renderInfo(`Provider: ${session.metadata.provider}, Model: ${session.metadata.model}`));
+            }
+          } else {
+            console.log(renderer.renderError(`Session not found: ${identifier}`));
+          }
+        }
+        break;
+
+      case 'sessions':
+        const sessions = sessionManager.listSessions();
+        if (sessions.length === 0) {
+          console.log(renderer.renderInfo('No saved sessions found'));
+        } else {
+          console.log(renderer.renderHeader(`Saved Sessions (${sessions.length})`));
+          sessions.forEach((session, index) => {
+            const current = session.id === this.currentSessionId ? chalk.green(' (current)') : '';
+            const date = new Date(session.updatedAt).toLocaleString();
+            console.log(`${chalk.yellow(`${index + 1}.`)} ${chalk.cyan(session.name)}${current}`);
+            console.log(`   ${chalk.gray(`ID: ${session.id}`)}`);
+            console.log(`   ${chalk.gray(`Messages: ${session.metadata.messageCount} | Updated: ${date}`)}`);
+            if (session.metadata.provider) {
+              console.log(`   ${chalk.gray(`Provider: ${session.metadata.provider} | Model: ${session.metadata.model}`)}`);
+            }
+            console.log('');
+          });
+        }
+        break;
+
+      case 'delete-session':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name or ID'));
+          console.log(renderer.renderInfo('Usage: /delete-session <session-name-or-id>'));
+        } else {
+          const identifier = args.join(' ');
+          if (sessionManager.deleteSession(identifier)) {
+            console.log(renderer.renderSuccess(`Session deleted: ${identifier}`));
+            if (this.currentSessionId === identifier) {
+              this.currentSessionId = null;
+            }
+          } else {
+            console.log(renderer.renderError(`Session not found: ${identifier}`));
+          }
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -351,6 +429,12 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/approve')} or ${chalk.yellow('/yes')} - Approve pending plan
   ${chalk.yellow('/reject')} or ${chalk.yellow('/no')}  - Reject pending plan
   ${chalk.yellow('exit')} or ${chalk.yellow('quit')} - Exit the application
+
+${chalk.cyan.bold('Session Management:')}
+  ${chalk.yellow('/save <name>')}         - Save current conversation
+  ${chalk.yellow('/load <name-or-id>')}   - Load a saved session
+  ${chalk.yellow('/sessions')}            - List all saved sessions
+  ${chalk.yellow('/delete-session <name-or-id>')} - Delete a session
 
 ${chalk.cyan.bold('Providers:')}
   ${chalk.green('ollama')}       - Local Ollama models (default)
