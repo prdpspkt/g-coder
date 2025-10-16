@@ -1,0 +1,37 @@
+# Source files
+src/
+tsconfig.json
+
+# Tests
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# Development files
+.vscode/
+.idea/
+.editorconfig
+.cline_sessions/
+.claude/
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
