@@ -33,6 +33,7 @@ export class CLI {
   private multiLineBuffer: string[] = [];
   private isMultiLineMode: boolean = false;
   private codeBlockMarker: string = '';
+  private bossMode: boolean = false;
 
   constructor() {
     const config = configManager.get();
@@ -660,6 +661,19 @@ export class CLI {
         }
         break;
 
+      case 'boss':
+        this.bossMode = !this.bossMode;
+        if (this.bossMode) {
+          console.log(chalk.bold.red('🔥 BOSS MODE ENABLED 🔥'));
+          console.log(chalk.yellow('All approval requirements bypassed'));
+          console.log(chalk.yellow('Tools will execute without confirmation'));
+          console.log(chalk.gray('Use with caution - type /boss again to disable'));
+        } else {
+          console.log(chalk.green('✓ Boss mode disabled'));
+          console.log(renderer.renderInfo('Normal approval settings restored'));
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -687,6 +701,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/approve')} or ${chalk.yellow('/yes')} - Approve pending plan
   ${chalk.yellow('/reject')} or ${chalk.yellow('/no')}  - Reject pending plan
   ${chalk.yellow('/approval')}   - Manage execution approval settings (on/off/stats)
+  ${chalk.yellow('/boss')}       - Toggle boss mode (bypass all approvals - use with caution!)
   ${chalk.yellow('exit')} or ${chalk.yellow('quit')} - Exit the application
 
 ${chalk.cyan.bold('Session Management:')}
@@ -912,8 +927,8 @@ ${chalk.cyan.bold('Examples:')}
             continue;
           }
 
-          // Check if tool requires approval
-          if (this.approvalManager.requiresApproval(toolCall.name)) {
+          // Check if tool requires approval (skip if boss mode is enabled)
+          if (!this.bossMode && this.approvalManager.requiresApproval(toolCall.name)) {
             const approvalResult = await this.approvalManager.promptForApproval({
               toolName: toolCall.name,
               params: toolCall.params,
