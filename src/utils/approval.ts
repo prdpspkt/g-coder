@@ -67,16 +67,17 @@ export class ApprovalManager {
   }
 
   /**
-   * Check if parameters match auto-approve patterns
+   * Check if tool and parameters match auto-approve patterns
    */
-  private matchesAutoApprovePattern(params: Record<string, any>): boolean {
+  private matchesAutoApprovePattern(toolName: string, params: Record<string, any>): boolean {
     if (!this.config.autoApprovePatterns || this.config.autoApprovePatterns.length === 0) {
       return false;
     }
 
-    const paramsString = JSON.stringify(params).toLowerCase();
+    // Check if tool name matches any pattern
+    const toolSignature = this.generateApprovalSignature(toolName, params);
     return this.config.autoApprovePatterns.some(pattern =>
-      paramsString.includes(pattern.toLowerCase())
+      pattern.toLowerCase() === toolSignature.toLowerCase()
     );
   }
 
@@ -262,7 +263,7 @@ export class ApprovalManager {
     }
 
     // Check auto-approve patterns
-    if (this.matchesAutoApprovePattern(request.params)) {
+    if (this.matchesAutoApprovePattern(request.toolName, request.params)) {
       return { approved: true, reason: 'Auto-approved by pattern' };
     }
 
