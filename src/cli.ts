@@ -30,6 +30,9 @@ export class CLI {
   private statusInterval: NodeJS.Timeout | null = null;
   private projectScanned: boolean = false;
   private historyManager: ConversationHistoryManager;
+  private multiLineBuffer: string[] = [];
+  private isMultiLineMode: boolean = false;
+  private codeBlockMarker: string = '';
 
   constructor() {
     const config = configManager.get();
@@ -174,6 +177,40 @@ export class CLI {
   private setupHandlers(): void {
     this.rl.on('line', async (input: string) => {
       const trimmed = input.trim();
+
+      // Check for code block markers (```)
+      if (trimmed === '```' || trimmed.startsWith('```')) {
+        if (!this.isMultiLineMode) {
+          // Enter multi-line mode
+          this.isMultiLineMode = true;
+          this.codeBlockMarker = trimmed;
+          this.multiLineBuffer = [];
+          console.log(chalk.gray('Entering multi-line mode. Paste your code. Type ``` on a new line to finish.'));
+          this.rl.setPrompt(chalk.gray('... '));
+          this.rl.prompt();
+          return;
+        } else {
+          // Exit multi-line mode
+          this.isMultiLineMode = false;
+          const multiLineInput = this.multiLineBuffer.join('\n');
+          this.multiLineBuffer = [];
+          this.codeBlockMarker = '';
+          this.rl.setPrompt(renderer.renderPrompt());
+
+          if (multiLineInput.trim()) {
+            await this.processUserInput(multiLineInput);
+          }
+          this.rl.prompt();
+          return;
+        }
+      }
+
+      // If in multi-line mode, accumulate input
+      if (this.isMultiLineMode) {
+        this.multiLineBuffer.push(input);
+        this.rl.prompt();
+        return;
+      }
 
       if (!trimmed) {
         this.rl.prompt();
@@ -657,6 +694,11 @@ ${chalk.cyan.bold('Session Management:')}
   ${chalk.yellow('/load <name-or-id>')}   - Load a saved session
   ${chalk.yellow('/sessions')}            - List all saved sessions
   ${chalk.yellow('/delete-session <name-or-id>')} - Delete a session
+
+${chalk.cyan.bold('Multi-line Input:')}
+  ${chalk.yellow('```')}                  - Start multi-line mode (paste code blocks)
+  ${chalk.yellow('```')}                  - End multi-line mode and submit
+  Use this to paste large code snippets without line-by-line processing
 
 ${chalk.cyan.bold('Providers:')}
   ${chalk.green('ollama')}       - Local Ollama models (default)
