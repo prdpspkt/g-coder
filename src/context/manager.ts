@@ -126,7 +126,9 @@ After using a tool, you'll receive the result and can continue the conversation.
 3. For editing existing files: Use Edit tool for small changes, artifacts for rewrites
 4. For finding files: Use Glob tool
 5. For searching code: Use Grep tool
-6. For bash commands: Use Bash tool
+6. For bash commands: Use Bash tool (runs in PowerShell on Windows, bash on Linux/Mac)
+   - Use commands directly, don't wrap in "cmd /c" or "sh -c"
+   - Examples: "npm install", "git status", "mkdir dirname" (not "cmd /c npm install")
 7. Before implementing features: Search codebase to check if feature already exists (use Grep/Glob tools)
 8. Before creating directories: Check if they exist using Bash tool (e.g., "test -d dirname && echo exists || echo not exists")
 9. Always provide clear, concise explanations
