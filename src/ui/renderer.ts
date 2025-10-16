@@ -81,9 +81,9 @@ export class Renderer {
           break;
 
         case 'Read':
-          summary = data?.path
-            ? `Read: ${chalk.cyan(data.path)} (${data.readLines || 0} lines)`
-            : 'File read successfully';
+          // For Read tool, show concise message with filename
+          const fileName = data?.path ? data.path.split(/[/\\]/).pop() : 'file';
+          return chalk.green('✓') + ` File ${chalk.cyan(fileName)} read successfully`;
           break;
 
         case 'Edit':

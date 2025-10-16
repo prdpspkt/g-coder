@@ -8,7 +8,11 @@ import { logger } from './utils/logger';
 import { commandManager } from './utils/commands';
 import { hookManager } from './utils/hooks';
 import { artifactParser } from './utils/artifact-parser';
+import { sessionManager } from './utils/session';
 import { toOpenAITools, toAnthropicTools } from './tools/converter';
+import { ApprovalManager } from './utils/approval';
+import { PlatformDetector } from './utils/platform';
+import { ProjectScanner } from './utils/project-scanner';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -19,6 +23,11 @@ export class CLI {
   private isProcessing: boolean = false;
   private planMode: boolean = false;
   private pendingPlan: string | null = null;
+  private currentSessionId: string | null = null;
+  private approvalManager: ApprovalManager;
+  private currentTask: string = '';
+  private statusInterval: NodeJS.Timeout | null = null;
+  private projectScanned: boolean = false;
 
   constructor() {
     const config = configManager.get();
@@ -39,6 +48,10 @@ export class CLI {
       enableTokenShortening: config.enableTokenShortening,
       modelName: config.model,
     });
+
+    // Initialize approval manager with config
+    const approvalConfig = configManager.getApprovalConfig();
+    this.approvalManager = new ApprovalManager(approvalConfig);
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -140,9 +153,11 @@ export class CLI {
       }
 
       if (this.isProcessing) {
-        console.log(renderer.renderWarning('Please wait for the current request to complete'));
-        this.rl.prompt();
-        return;
+        // Input blocked during processing - show current task
+        process.stdout.write('\r\x1b[K'); // Clear current line
+        console.log(renderer.renderWarning(`Agent is busy: ${this.currentTask || 'Processing...'}`));
+        this.showStatusLine();
+        return; // Don't show prompt during processing
       }
 
       // Handle commands
@@ -167,6 +182,50 @@ export class CLI {
       await hookManager.trigger({ event: 'session_end' });
       process.exit(0);
     });
+  }
+
+  /**
+   * Pause readline input during processing
+   */
+  private pauseInput(): void {
+    this.rl.pause();
+  }
+
+  /**
+   * Resume readline input after processing
+   */
+  private resumeInput(): void {
+    this.rl.resume();
+  }
+
+  /**
+   * Update the current task and display status
+   */
+  private updateStatus(task: string): void {
+    this.currentTask = task;
+    this.showStatusLine();
+  }
+
+  /**
+   * Show status line above the prompt
+   */
+  private showStatusLine(): void {
+    if (!this.currentTask) return;
+
+    // Move cursor up, clear line, show status, move back
+    const statusLine = chalk.bgBlue.white(` ⚙ ${this.currentTask} `);
+    process.stdout.write(`\r\x1b[K${statusLine}\n`);
+  }
+
+  /**
+   * Clear status line
+   */
+  private clearStatusLine(): void {
+    this.currentTask = '';
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+      this.statusInterval = null;
+    }
   }
 
   private async handleCommand(command: string): Promise<void> {
@@ -250,6 +309,24 @@ export class CLI {
         console.log(renderer.renderSuccess('Reloaded commands and hooks'));
         break;
 
+      case 'rescan':
+        {
+          const scanSpinner = ora('Rescanning project...').start();
+          try {
+            ProjectScanner.clearCache();
+            const projectInfo = await ProjectScanner.scan();
+            const projectContext = ProjectScanner.formatAsContext(projectInfo);
+
+            scanSpinner.succeed(`Project rescanned: ${projectInfo.name} (${projectInfo.type})`);
+            console.log(chalk.cyan('\nProject Information:'));
+            console.log(projectContext);
+          } catch (error: any) {
+            scanSpinner.fail('Failed to rescan project');
+            console.log(renderer.renderError(error.message));
+          }
+        }
+        break;
+
       case 'model':
         if (args.length > 0) {
           const newModel = args.join(' ');
@@ -326,6 +403,171 @@ export class CLI {
         }
         break;
 
+      case 'save':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name'));
+          console.log(renderer.renderInfo('Usage: /save <session-name>'));
+        } else {
+          const sessionName = args.join(' ');
+          const messages = this.context.getMessages();
+          const config = configManager.get();
+          const session = sessionManager.saveSession(sessionName, messages, config.provider, config.model);
+          this.currentSessionId = session.id;
+          console.log(renderer.renderSuccess(`Session saved: ${session.name}`));
+          console.log(renderer.renderInfo(`${session.metadata.messageCount} messages saved`));
+        }
+        break;
+
+      case 'load':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name or ID'));
+          console.log(renderer.renderInfo('Usage: /load <session-name-or-id>'));
+        } else {
+          const identifier = args.join(' ');
+          const session = sessionManager.loadSession(identifier);
+          if (session) {
+            this.context.clear();
+            session.messages.forEach(msg => {
+              this.context.addMessage(msg.role as 'user' | 'assistant', msg.content);
+            });
+            this.currentSessionId = session.id;
+            console.log(renderer.renderSuccess(`Session loaded: ${session.name}`));
+            console.log(renderer.renderInfo(`${session.metadata.messageCount} messages restored`));
+            if (session.metadata.provider) {
+              console.log(renderer.renderInfo(`Provider: ${session.metadata.provider}, Model: ${session.metadata.model}`));
+            }
+          } else {
+            console.log(renderer.renderError(`Session not found: ${identifier}`));
+          }
+        }
+        break;
+
+      case 'sessions':
+        const sessions = sessionManager.listSessions();
+        if (sessions.length === 0) {
+          console.log(renderer.renderInfo('No saved sessions found'));
+        } else {
+          console.log(renderer.renderHeader(`Saved Sessions (${sessions.length})`));
+          sessions.forEach((session, index) => {
+            const current = session.id === this.currentSessionId ? chalk.green(' (current)') : '';
+            const date = new Date(session.updatedAt).toLocaleString();
+            console.log(`${chalk.yellow(`${index + 1}.`)} ${chalk.cyan(session.name)}${current}`);
+            console.log(`   ${chalk.gray(`ID: ${session.id}`)}`);
+            console.log(`   ${chalk.gray(`Messages: ${session.metadata.messageCount} | Updated: ${date}`)}`);
+            if (session.metadata.provider) {
+              console.log(`   ${chalk.gray(`Provider: ${session.metadata.provider} | Model: ${session.metadata.model}`)}`);
+            }
+            console.log('');
+          });
+        }
+        break;
+
+      case 'delete-session':
+        if (args.length === 0) {
+          console.log(renderer.renderError('Please provide a session name or ID'));
+          console.log(renderer.renderInfo('Usage: /delete-session <session-name-or-id>'));
+        } else {
+          const identifier = args.join(' ');
+          if (sessionManager.deleteSession(identifier)) {
+            console.log(renderer.renderSuccess(`Session deleted: ${identifier}`));
+            if (this.currentSessionId === identifier) {
+              this.currentSessionId = null;
+            }
+          } else {
+            console.log(renderer.renderError(`Session not found: ${identifier}`));
+          }
+        }
+        break;
+
+      case 'approval':
+        if (args.length === 0) {
+          // Show approval status
+          const approvalConfig = this.approvalManager.getConfig();
+          const platformInfo = this.approvalManager.getPlatformInfo();
+
+          console.log(renderer.renderHeader('Execution Approval Settings'));
+          console.log(renderer.renderInfo(`Status: ${approvalConfig.enabled ? chalk.green('enabled') : chalk.red('disabled')}`));
+          console.log(renderer.renderInfo(`Platform: ${chalk.cyan(PlatformDetector.getDescription(platformInfo))}`));
+          console.log(chalk.gray(`  Detected ${platformInfo.dangerousPatterns.length} dangerous patterns for your OS`));
+
+          if (approvalConfig.enabled) {
+            console.log(chalk.cyan('\nTools requiring approval:'));
+            Object.entries(approvalConfig.toolsRequiringApproval).forEach(([tool, required]) => {
+              if (required) {
+                console.log(chalk.yellow(`  ✓ ${tool}`));
+              }
+            });
+
+            const stats = this.approvalManager.getStatistics();
+            if (stats.total > 0) {
+              console.log(chalk.cyan('\nApproval Statistics:'));
+              console.log(chalk.gray(`  Total requests: ${stats.total}`));
+              console.log(chalk.green(`  Approved: ${stats.approved}`));
+              console.log(chalk.red(`  Declined: ${stats.declined}`));
+            }
+          }
+
+          console.log(chalk.gray('\nUsage:'));
+          console.log(chalk.gray('  /approval on    - Enable execution approval'));
+          console.log(chalk.gray('  /approval off   - Disable execution approval'));
+          console.log(chalk.gray('  /approval reset - Reset auto-approve patterns'));
+          console.log(chalk.gray('  /approval stats - Show approval statistics'));
+        } else {
+          const subCmd = args[0].toLowerCase();
+
+          switch (subCmd) {
+            case 'on':
+            case 'enable':
+              configManager.setApprovalEnabled(true);
+              this.approvalManager.updateConfig({ enabled: true });
+              console.log(renderer.renderSuccess('Execution approval enabled'));
+              console.log(renderer.renderInfo('You will be prompted before dangerous operations'));
+              break;
+
+            case 'off':
+            case 'disable':
+              configManager.setApprovalEnabled(false);
+              this.approvalManager.updateConfig({ enabled: false });
+              console.log(renderer.renderInfo('Execution approval disabled'));
+              console.log(renderer.renderWarning('Tools will execute without confirmation'));
+              break;
+
+            case 'reset':
+              this.approvalManager.resetAutoApprove();
+              console.log(renderer.renderSuccess('Auto-approve patterns cleared'));
+              break;
+
+            case 'stats':
+            case 'statistics':
+              const stats = this.approvalManager.getStatistics();
+              console.log(renderer.renderHeader('Approval Statistics'));
+              console.log(chalk.cyan(`Total requests: ${stats.total}`));
+              console.log(chalk.green(`Approved: ${stats.approved}`));
+              console.log(chalk.red(`Declined: ${stats.declined}`));
+
+              if (Object.keys(stats.byTool).length > 0) {
+                console.log(chalk.cyan('\nBy Tool:'));
+                Object.entries(stats.byTool).forEach(([tool, counts]) => {
+                  console.log(chalk.yellow(`  ${tool}:`));
+                  console.log(chalk.green(`    Approved: ${counts.approved}`));
+                  console.log(chalk.red(`    Declined: ${counts.declined}`));
+                });
+              }
+              break;
+
+            case 'clear':
+            case 'clear-history':
+              this.approvalManager.clearHistory();
+              console.log(renderer.renderSuccess('Approval history cleared'));
+              break;
+
+            default:
+              console.log(renderer.renderError(`Unknown approval subcommand: ${subCmd}`));
+              console.log(renderer.renderInfo('Use: on, off, reset, stats, or clear'));
+          }
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -343,6 +585,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/commands')}   - List custom slash commands
   ${chalk.yellow('/hooks')}      - Show configured hooks
   ${chalk.yellow('/reload')}     - Reload commands and hooks
+  ${chalk.yellow('/rescan')}     - Rescan project structure and context
   ${chalk.yellow('/model')}      - Show or change current model
   ${chalk.yellow('/provider')}   - Show or change AI provider
   ${chalk.yellow('/config')}     - Show current configuration
@@ -350,7 +593,14 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/plan')}       - Toggle plan mode (requires approval before execution)
   ${chalk.yellow('/approve')} or ${chalk.yellow('/yes')} - Approve pending plan
   ${chalk.yellow('/reject')} or ${chalk.yellow('/no')}  - Reject pending plan
+  ${chalk.yellow('/approval')}   - Manage execution approval settings (on/off/stats)
   ${chalk.yellow('exit')} or ${chalk.yellow('quit')} - Exit the application
+
+${chalk.cyan.bold('Session Management:')}
+  ${chalk.yellow('/save <name>')}         - Save current conversation
+  ${chalk.yellow('/load <name-or-id>')}   - Load a saved session
+  ${chalk.yellow('/sessions')}            - List all saved sessions
+  ${chalk.yellow('/delete-session <name-or-id>')} - Delete a session
 
 ${chalk.cyan.bold('Providers:')}
   ${chalk.green('ollama')}       - Local Ollama models (default)
@@ -375,8 +625,32 @@ ${chalk.cyan.bold('Examples:')}
 
   private async processUserInput(input: string): Promise<void> {
     this.isProcessing = true;
+    this.pauseInput();
+    this.updateStatus('Processing your request...');
 
     try {
+      // Scan project on first user input
+      if (!this.projectScanned) {
+        this.updateStatus('Scanning project...');
+        const scanSpinner = ora('Analyzing project structure...').start();
+
+        try {
+          const projectInfo = await ProjectScanner.scan();
+          const projectContext = ProjectScanner.formatAsContext(projectInfo);
+
+          // Add project context to the conversation
+          this.context.addMessage('user', `${projectContext}\n\nPlease keep this project context in mind for all future questions and responses.`);
+          this.context.addMessage('assistant', `I understand. I'm now working on the ${projectInfo.name} project (${projectInfo.type}). I'll use this context to provide more relevant assistance.`);
+
+          scanSpinner.succeed(`Project scanned: ${projectInfo.name} (${projectInfo.type})`);
+          this.projectScanned = true;
+        } catch (error: any) {
+          scanSpinner.fail('Failed to scan project');
+          logger.warn('Project scan failed:', error.message);
+          this.projectScanned = true; // Don't try again
+        }
+      }
+
       // Trigger user prompt submit hook
       const hookResult = await hookManager.trigger({
         event: 'user_prompt_submit',
@@ -408,6 +682,7 @@ ${chalk.cyan.bold('Examples:')}
       console.log(''); // New line before response
 
       // Show spinner while AI is thinking
+      this.updateStatus('AI is thinking...');
       const thinkingSpinner = ora('AI is processing your request...').start();
 
       // Stream response from provider (silent, no console output)
@@ -502,10 +777,14 @@ ${chalk.cyan.bold('Examples:')}
         }
 
         // Execute tools in parallel
+        this.updateStatus(`Executing ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`);
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
         const toolPromises = toolCalls.map(async (toolCall) => {
-          console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
+          // Don't show tool call details for Read tool - will show concise message instead
+          if (toolCall.name !== 'Read') {
+            console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
+          }
 
           // Track this tool execution
           executedTools.push(`${toolCall.name}:${JSON.stringify(toolCall.params)}`);
@@ -529,6 +808,22 @@ ${chalk.cyan.bold('Examples:')}
               toolCall,
               result: { success: false, error: 'Blocked by hook' },
             };
+          }
+
+          // Check if tool requires approval
+          if (this.approvalManager.requiresApproval(toolCall.name)) {
+            const approvalResult = await this.approvalManager.promptForApproval({
+              toolName: toolCall.name,
+              params: toolCall.params,
+            });
+
+            if (!approvalResult.approved) {
+              console.log(renderer.renderWarning(`Tool ${toolCall.name} execution cancelled`));
+              return {
+                toolCall,
+                result: { success: false, error: approvalResult.reason || 'User declined' },
+              };
+            }
           }
 
           const result = await toolRegistry.executeTool(toolCall.name, toolCall.params);
@@ -574,6 +869,7 @@ ${chalk.cyan.bold('Examples:')}
           // Get AI response to all tool results
           const followUpMessages = this.context.getAIMessages();
 
+          this.updateStatus('AI analyzing tool results...');
           const followUpSpinner = ora('AI analyzing tool results...').start();
 
           let followUpResponse: string;
@@ -634,6 +930,8 @@ ${chalk.cyan.bold('Examples:')}
       logger.error('Error processing input:', error);
     } finally {
       this.isProcessing = false;
+      this.clearStatusLine();
+      this.resumeInput();
     }
   }
 
@@ -755,7 +1053,25 @@ ${chalk.cyan.bold('Examples:')}
       }
     }
 
-    return toolCalls;
+    // Deduplicate tool calls (remove exact duplicates based on name and params)
+    const uniqueToolCalls: Array<{ name: string; params: Record<string, any> }> = [];
+    const seen = new Set<string>();
+
+    for (const toolCall of toolCalls) {
+      const signature = `${toolCall.name}:${JSON.stringify(toolCall.params)}`;
+      if (!seen.has(signature)) {
+        seen.add(signature);
+        uniqueToolCalls.push(toolCall);
+      } else {
+        logger.warn(`Removed duplicate tool call: ${toolCall.name}`);
+      }
+    }
+
+    if (uniqueToolCalls.length < toolCalls.length) {
+      console.log(renderer.renderWarning(`Removed ${toolCalls.length - uniqueToolCalls.length} duplicate tool call(s)`));
+    }
+
+    return uniqueToolCalls;
   }
 
   private parseValue(value: string): any {

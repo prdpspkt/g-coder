@@ -13,7 +13,13 @@
       "Bash(npm install:*)",
       "Bash(git commit:*)",
       "Read(//c/Users/Acer/.g-coder/**)",
-      "Bash(npm version:*)"
+      "Bash(npm version:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "Bash(git restore:*)",
+      "Bash(set:*)"
     ],
     "deny": [],
     "ask": []

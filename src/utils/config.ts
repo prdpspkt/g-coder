@@ -3,9 +3,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as dotenv from 'dotenv';
 import { ProviderType } from '../providers/types';
+import { ApprovalConfig, createDefaultApprovalConfig } from './approval';
 
-// Load environment variables from .env file
-dotenv.config();
+const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const ENV_FILE = path.join(CONFIG_DIR, '.env');
+
+// Load environment variables from .env file in ~/.g-coder
+dotenv.config({ path: ENV_FILE });
 
 export interface Config {
   provider: ProviderType;
@@ -24,108 +29,14 @@ export interface Config {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
+
+  // Execution approval settings
+  approval?: ApprovalConfig;
 }
 
-const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
-const ENV_FILE = path.join(CONFIG_DIR, '.env');
+// Helper function removed - system prompt now comes from config.json file only
 
-const DEFAULT_CONFIG: Config = {
-  provider: 'ollama',
-  model: 'codellama',
-  temperature: 0.7,
-  maxTokens: 4096,
-  maxContextTokens: 8000,
-  maxMessageTokens: 2000,
-  enableTokenShortening: true,
-  ollamaUrl: 'http://localhost:11434',
-  systemPrompt: `You are G-Coder, an AI coding assistant. You help developers with:
-- Writing and editing code
-- Debugging and fixing errors
-- Searching through codebases
-- Running commands and tests
-- Refactoring and improving code
-- Explaining how code works
-
-You have access to various tools to interact with the filesystem and execute commands. Always provide clear, concise, and helpful responses.
-
-CRITICAL FORMATTING RULE: When you need to use tools, you MUST use code blocks with the type "tool-call".
-DO NOT use "json", "text", or any other code block type. ONLY use "tool-call".
-
-The ONLY accepted format is three backticks followed by tool-call, then your Tool and Parameters, then three backticks to close
-
-Available Tools:
-
-1. Read - Read file contents
-Example:
-\`\`\`tool-call
-Tool: Read
-Parameters:
-file_path: src/index.ts
-\`\`\`
-
-2. Write - Create new files (or overwrite existing files)
-Example:
-\`\`\`tool-call
-Tool: Write
-Parameters:
-file_path: web/index.html
-content: <!DOCTYPE html>
-<html>
-<head><title>My Website</title></head>
-<body><h1>Hello World</h1></body>
-</html>
-\`\`\`
-
-3. Edit - Modify existing files (use exact string replacement)
-Example:
-\`\`\`tool-call
-Tool: Edit
-Parameters:
-file_path: src/app.ts
-old_string: console.log('old');
-new_string: console.log('new');
-\`\`\`
-
-4. Glob - Find files by pattern
-Example:
-\`\`\`tool-call
-Tool: Glob
-Parameters:
-pattern: **/*.ts
-\`\`\`
-
-5. Grep - Search file contents
-Example:
-\`\`\`tool-call
-Tool: Grep
-Parameters:
-pattern: function handleLogin
-path: src/
-\`\`\`
-
-6. Bash - Execute shell commands
-Example:
-\`\`\`tool-call
-Tool: Bash
-Parameters:
-command: npm test
-\`\`\`
-
-7. TodoWrite - Manage task lists for complex multi-step work
-Example:
-\`\`\`tool-call
-Tool: TodoWrite
-Parameters:
-todos: [{"content": "Fix bug in parser", "status": "completed", "activeForm": "Fixing bug in parser"}, {"content": "Add tests", "status": "in_progress", "activeForm": "Adding tests"}, {"content": "Update docs", "status": "pending", "activeForm": "Updating docs"}]
-\`\`\`
-
-IMPORTANT: Use TodoWrite proactively for complex tasks. Update it frequently as you work. Only ONE task should be "in_progress" at a time.
-
-CRITICAL: You must use the exact format above with the tool-call code block, "Tool:" label, and "Parameters:" section. Do not deviate from this format or the tools will not execute.
-
-Be proactive and suggest improvements when appropriate.`,
-};
+// Removed hardcoded defaults - all configuration must come from config.json file
 
 export class ConfigManager {
   private config: Config;
@@ -140,23 +51,22 @@ export class ConfigManager {
         fs.mkdirSync(CONFIG_DIR, { recursive: true });
       }
 
-      let config = { ...DEFAULT_CONFIG };
-
-      // Load from config file
-      if (fs.existsSync(CONFIG_FILE)) {
-        const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-        config = { ...config, ...JSON.parse(fileContent) };
-      } else {
-        this.saveConfig(DEFAULT_CONFIG);
+      // Always require config file to exist
+      if (!fs.existsSync(CONFIG_FILE)) {
+        throw new Error(`Configuration file not found: ${CONFIG_FILE}\nPlease create a config.json file in ${CONFIG_DIR}`);
       }
 
-      // Override with environment variables
+      // Load from config file only
+      const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      let config = JSON.parse(fileContent) as Config;
+
+      // Override with environment variables (only for API keys)
       config = this.applyEnvVariables(config);
 
       return config;
-    } catch (error) {
-      console.warn('Failed to load config, using defaults:', error);
-      return DEFAULT_CONFIG;
+    } catch (error: any) {
+      console.error('Failed to load configuration:', error.message);
+      throw error;
     }
   }
 
@@ -213,8 +123,7 @@ export class ConfigManager {
   }
 
   reset(): void {
-    this.config = DEFAULT_CONFIG;
-    this.saveConfig(this.config);
+    throw new Error('Reset is not available. Please manually edit your config.json file at: ' + CONFIG_FILE);
   }
 
   getConfigPath(): string {
@@ -268,6 +177,38 @@ export class ConfigManager {
     if (provider === 'anthropic') return this.config.anthropicApiKey;
     if (provider === 'deepseek') return this.config.deepseekApiKey;
     return undefined;
+  }
+
+  // Approval configuration methods
+  getApprovalConfig(): ApprovalConfig {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    return { ...this.config.approval };
+  }
+
+  setApprovalEnabled(enabled: boolean): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval.enabled = enabled;
+    this.saveConfig(this.config);
+  }
+
+  updateApprovalConfig(partial: Partial<ApprovalConfig>): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval = { ...this.config.approval, ...partial };
+    this.saveConfig(this.config);
+  }
+
+  setToolApproval(toolName: string, requiresApproval: boolean): void {
+    if (!this.config.approval) {
+      this.config.approval = createDefaultApprovalConfig();
+    }
+    this.config.approval.toolsRequiringApproval[toolName] = requiresApproval;
+    this.saveConfig(this.config);
   }
 }
 
