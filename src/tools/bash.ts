@@ -56,8 +56,8 @@ export class BashTool implements Tool {
       if (background) {
         const shellId = this.generateShellId();
         const proc = spawn(
-          process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
-          process.platform === 'win32' ? ['-Command', command] : ['-c', command],
+          process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
+          process.platform === 'win32' ? ['/c', command] : ['-c', command],
           { cwd, shell: true }
         );
 
@@ -108,7 +108,7 @@ export class BashTool implements Tool {
         cwd,
         timeout,
         maxBuffer: 1024 * 1024 * 10, // 10MB buffer
-        shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
+        shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
       });
 
       const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
@@ -179,8 +179,8 @@ export class BashTool implements Tool {
     return new Promise((resolve) => {
       logger.tool('Bash', `Executing (interactive): ${command}`);
 
-      const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
-      const args = process.platform === 'win32' ? ['-Command', command] : ['-c', command];
+      const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
+      const args = process.platform === 'win32' ? ['/c', command] : ['-c', command];
 
       const child = spawn(shell, args, {
         cwd,
