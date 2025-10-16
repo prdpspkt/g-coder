@@ -167,6 +167,31 @@ After using a tool, you'll receive the result and can continue the conversation.
   }
 
   /**
+   * Check if we're approaching token limit (90% threshold)
+   */
+  isApproachingTokenLimit(): boolean {
+    if (!this.tokenizer) {
+      return false;
+    }
+
+    const currentTokens = this.getTokenCount();
+    const threshold = this.maxContextTokens * 0.9; // 90% threshold
+    return currentTokens >= threshold;
+  }
+
+  /**
+   * Check if token limit is exceeded
+   */
+  isTokenLimitExceeded(): boolean {
+    if (!this.tokenizer) {
+      return false;
+    }
+
+    const currentTokens = this.getTokenCount();
+    return currentTokens >= this.maxContextTokens;
+  }
+
+  /**
    * Update token shortening settings
    */
   setTokenLimits(maxContextTokens: number, maxMessageTokens?: number): void {

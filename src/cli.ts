@@ -984,6 +984,9 @@ ${chalk.cyan.bold('Examples:')}
         assistantResponse: fullResponse,
       });
 
+      // Check if token limit is exceeded and auto-continue
+      await this.checkAndHandleTokenLimit();
+
     } catch (error: any) {
       console.log(renderer.renderError(error.message));
       logger.error('Error processing input:', error);
@@ -1131,6 +1134,53 @@ ${chalk.cyan.bold('Examples:')}
     }
 
     return uniqueToolCalls;
+  }
+
+  /**
+   * Check if token limit is exceeded and handle auto-continuation
+   */
+  private async checkAndHandleTokenLimit(): Promise<void> {
+    const config = configManager.get();
+
+    // Check if approaching or exceeded token limit
+    if (this.context.isTokenLimitExceeded()) {
+      console.log(chalk.yellow.bold('\n⚠️  Token Limit Exceeded'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.cyan('The conversation has reached the maximum token limit.'));
+      console.log(chalk.cyan('Automatically saving current conversation and starting fresh...\n'));
+
+      // Auto-save current conversation
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const sessionName = `auto-save-${timestamp}`;
+      const messages = this.context.getMessages();
+
+      try {
+        const session = sessionManager.saveSession(sessionName, messages, config.provider, config.model);
+        console.log(chalk.green(`✓ Conversation saved: ${session.name}`));
+        console.log(chalk.gray(`  Session ID: ${session.id}`));
+        console.log(chalk.gray(`  Messages saved: ${session.metadata.messageCount}`));
+        console.log(chalk.gray(`  You can load this session later with: /load ${session.id}\n`));
+      } catch (error: any) {
+        logger.error('Failed to auto-save session:', error);
+        console.log(chalk.red(`✗ Failed to auto-save session: ${error.message}\n`));
+      }
+
+      // Clear context to continue
+      this.context.clear();
+      console.log(chalk.green('✓ Context cleared - ready to continue with a fresh conversation'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.cyan('💡 Tip: Previous conversation history is still available in project history'));
+      console.log(chalk.cyan('    and can be accessed with /history or /sessions commands.\n'));
+
+    } else if (this.context.isApproachingTokenLimit()) {
+      // Warn when approaching limit (90% threshold)
+      const tokenCount = this.context.getTokenCount();
+      const maxTokens = config.maxContextTokens || 8000;
+      const percentage = Math.round((tokenCount / maxTokens) * 100);
+
+      console.log(chalk.yellow(`\n⚠️  Approaching token limit: ${tokenCount} / ${maxTokens} tokens (${percentage}%)`));
+      console.log(chalk.gray('   Conversation will auto-save and continue when limit is reached.\n'));
+    }
   }
 
   private parseValue(value: string): any {
