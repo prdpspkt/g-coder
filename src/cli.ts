@@ -13,6 +13,7 @@ import { toOpenAITools, toAnthropicTools } from './tools/converter';
 import { ApprovalManager } from './utils/approval';
 import { PlatformDetector } from './utils/platform';
 import { ProjectScanner } from './utils/project-scanner';
+import { ConversationHistoryManager } from './utils/history';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -28,6 +29,7 @@ export class CLI {
   private currentTask: string = '';
   private statusInterval: NodeJS.Timeout | null = null;
   private projectScanned: boolean = false;
+  private historyManager: ConversationHistoryManager;
 
   constructor() {
     const config = configManager.get();
@@ -52,6 +54,9 @@ export class CLI {
     // Initialize approval manager with config
     const approvalConfig = configManager.getApprovalConfig();
     this.approvalManager = new ApprovalManager(approvalConfig);
+
+    // Initialize conversation history manager
+    this.historyManager = new ConversationHistoryManager();
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -111,6 +116,29 @@ export class CLI {
     console.log(renderer.renderHeader('G-Coder - AI Coding Assistant'));
     console.log(renderer.renderInfo(`Provider: ${this.provider.name}`));
     console.log(renderer.renderInfo(`Model: ${config.model}`));
+
+    // Load and display conversation history context if available
+    if (this.historyManager.hasHistory()) {
+      const summary = this.historyManager.getContextSummary();
+      console.log(chalk.cyan('\n📚 Previous Conversation Context:'));
+      console.log(chalk.gray(summary));
+
+      // Load recent history into context for AI awareness
+      const recentHistory = this.historyManager.getRecentHistory(5);
+      if (recentHistory.length > 0) {
+        console.log(chalk.gray(`   Loaded ${recentHistory.length} previous interactions for context awareness`));
+
+        // Add summarized history to AI context (as a user message with context information)
+        const historySummary = `[CONTEXT: Previous conversation history from this project]\n` +
+          recentHistory.map(msg => `${msg.role}: ${msg.content.substring(0, 150)}...`).join('\n') +
+          `\n[END CONTEXT]`;
+
+        this.context.addMessage('user', historySummary);
+        this.context.addMessage('assistant', 'I understand the previous conversation context and will use it to provide more relevant assistance.');
+      }
+      console.log('');
+    }
+
     console.log(renderer.renderInfo('Type "exit" to quit, "/help" for commands\n'));
 
     this.setupHandlers();
@@ -568,6 +596,33 @@ export class CLI {
         }
         break;
 
+      case 'history':
+        if (args.length === 0) {
+          // Show history summary
+          if (this.historyManager.hasHistory()) {
+            const summary = this.historyManager.getContextSummary();
+            console.log(renderer.renderHeader('Conversation History'));
+            console.log(summary);
+            console.log(chalk.gray(`\nHistory file: ${this.historyManager.getHistoryFilePath()}`));
+            console.log(chalk.gray('\nUsage:'));
+            console.log(chalk.gray('  /history         - Show history summary'));
+            console.log(chalk.gray('  /history clear   - Clear conversation history'));
+          } else {
+            console.log(renderer.renderInfo('No conversation history found'));
+            console.log(chalk.gray('History will be saved automatically as you interact with g-coder'));
+          }
+        } else {
+          const subCmd = args[0].toLowerCase();
+          if (subCmd === 'clear') {
+            this.historyManager.clearHistory();
+            console.log(renderer.renderSuccess('Conversation history cleared'));
+          } else {
+            console.log(renderer.renderError(`Unknown history subcommand: ${subCmd}`));
+            console.log(renderer.renderInfo('Use: /history or /history clear'));
+          }
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -586,6 +641,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/hooks')}      - Show configured hooks
   ${chalk.yellow('/reload')}     - Reload commands and hooks
   ${chalk.yellow('/rescan')}     - Rescan project structure and context
+  ${chalk.yellow('/history')}    - View or clear project conversation history
   ${chalk.yellow('/model')}      - Show or change current model
   ${chalk.yellow('/provider')}   - Show or change AI provider
   ${chalk.yellow('/config')}     - Show current configuration
@@ -668,8 +724,9 @@ ${chalk.cyan.bold('Examples:')}
         return;
       }
 
-      // Add user message to context
+      // Add user message to context and history
       this.context.addMessage('user', input);
+      this.historyManager.addMessage('user', input);
 
       // Track tool execution to prevent infinite loops
       const executedTools: string[] = [];
@@ -917,8 +974,9 @@ ${chalk.cyan.bold('Examples:')}
         console.log('');
       }
 
-      // Add assistant response to context
+      // Add assistant response to context and history
       this.context.addMessage('assistant', fullResponse);
+      this.historyManager.addMessage('assistant', fullResponse);
 
       // Trigger assistant response hook
       await hookManager.trigger({
