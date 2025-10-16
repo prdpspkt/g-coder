@@ -839,7 +839,25 @@ ${chalk.cyan.bold('Examples:')}
       }
     }
 
-    return toolCalls;
+    // Deduplicate tool calls (remove exact duplicates based on name and params)
+    const uniqueToolCalls: Array<{ name: string; params: Record<string, any> }> = [];
+    const seen = new Set<string>();
+
+    for (const toolCall of toolCalls) {
+      const signature = `${toolCall.name}:${JSON.stringify(toolCall.params)}`;
+      if (!seen.has(signature)) {
+        seen.add(signature);
+        uniqueToolCalls.push(toolCall);
+      } else {
+        logger.warn(`Removed duplicate tool call: ${toolCall.name}`);
+      }
+    }
+
+    if (uniqueToolCalls.length < toolCalls.length) {
+      console.log(renderer.renderWarning(`Removed ${toolCalls.length - uniqueToolCalls.length} duplicate tool call(s)`));
+    }
+
+    return uniqueToolCalls;
   }
 
   private parseValue(value: string): any {
