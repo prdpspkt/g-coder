@@ -15,7 +15,10 @@
       "Read(//c/Users/Acer/.g-coder/**)",
       "Bash(npm version:*)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
