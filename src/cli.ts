@@ -13,6 +13,7 @@ import { toOpenAITools, toAnthropicTools } from './tools/converter';
 import { ApprovalManager } from './utils/approval';
 import { PlatformDetector } from './utils/platform';
 import { ProjectScanner } from './utils/project-scanner';
+import { ConversationHistoryManager } from './utils/history';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -28,6 +29,7 @@ export class CLI {
   private currentTask: string = '';
   private statusInterval: NodeJS.Timeout | null = null;
   private projectScanned: boolean = false;
+  private historyManager: ConversationHistoryManager;
 
   constructor() {
     const config = configManager.get();
@@ -52,6 +54,9 @@ export class CLI {
     // Initialize approval manager with config
     const approvalConfig = configManager.getApprovalConfig();
     this.approvalManager = new ApprovalManager(approvalConfig);
+
+    // Initialize conversation history manager
+    this.historyManager = new ConversationHistoryManager();
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -111,6 +116,29 @@ export class CLI {
     console.log(renderer.renderHeader('G-Coder - AI Coding Assistant'));
     console.log(renderer.renderInfo(`Provider: ${this.provider.name}`));
     console.log(renderer.renderInfo(`Model: ${config.model}`));
+
+    // Load and display conversation history context if available
+    if (this.historyManager.hasHistory()) {
+      const summary = this.historyManager.getContextSummary();
+      console.log(chalk.cyan('\n📚 Previous Conversation Context:'));
+      console.log(chalk.gray(summary));
+
+      // Load recent history into context for AI awareness
+      const recentHistory = this.historyManager.getRecentHistory(5);
+      if (recentHistory.length > 0) {
+        console.log(chalk.gray(`   Loaded ${recentHistory.length} previous interactions for context awareness`));
+
+        // Add summarized history to AI context (as a user message with context information)
+        const historySummary = `[CONTEXT: Previous conversation history from this project]\n` +
+          recentHistory.map(msg => `${msg.role}: ${msg.content.substring(0, 150)}...`).join('\n') +
+          `\n[END CONTEXT]`;
+
+        this.context.addMessage('user', historySummary);
+        this.context.addMessage('assistant', 'I understand the previous conversation context and will use it to provide more relevant assistance.');
+      }
+      console.log('');
+    }
+
     console.log(renderer.renderInfo('Type "exit" to quit, "/help" for commands\n'));
 
     this.setupHandlers();
@@ -568,6 +596,33 @@ export class CLI {
         }
         break;
 
+      case 'history':
+        if (args.length === 0) {
+          // Show history summary
+          if (this.historyManager.hasHistory()) {
+            const summary = this.historyManager.getContextSummary();
+            console.log(renderer.renderHeader('Conversation History'));
+            console.log(summary);
+            console.log(chalk.gray(`\nHistory file: ${this.historyManager.getHistoryFilePath()}`));
+            console.log(chalk.gray('\nUsage:'));
+            console.log(chalk.gray('  /history         - Show history summary'));
+            console.log(chalk.gray('  /history clear   - Clear conversation history'));
+          } else {
+            console.log(renderer.renderInfo('No conversation history found'));
+            console.log(chalk.gray('History will be saved automatically as you interact with g-coder'));
+          }
+        } else {
+          const subCmd = args[0].toLowerCase();
+          if (subCmd === 'clear') {
+            this.historyManager.clearHistory();
+            console.log(renderer.renderSuccess('Conversation history cleared'));
+          } else {
+            console.log(renderer.renderError(`Unknown history subcommand: ${subCmd}`));
+            console.log(renderer.renderInfo('Use: /history or /history clear'));
+          }
+        }
+        break;
+
       default:
         console.log(renderer.renderError(`Unknown command: ${cmd}`));
         console.log(renderer.renderInfo('Type /help for available commands'));
@@ -586,6 +641,7 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('/hooks')}      - Show configured hooks
   ${chalk.yellow('/reload')}     - Reload commands and hooks
   ${chalk.yellow('/rescan')}     - Rescan project structure and context
+  ${chalk.yellow('/history')}    - View or clear project conversation history
   ${chalk.yellow('/model')}      - Show or change current model
   ${chalk.yellow('/provider')}   - Show or change AI provider
   ${chalk.yellow('/config')}     - Show current configuration
@@ -668,8 +724,9 @@ ${chalk.cyan.bold('Examples:')}
         return;
       }
 
-      // Add user message to context
+      // Add user message to context and history
       this.context.addMessage('user', input);
+      this.historyManager.addMessage('user', input);
 
       // Track tool execution to prevent infinite loops
       const executedTools: string[] = [];
@@ -776,11 +833,13 @@ ${chalk.cyan.bold('Examples:')}
           break;
         }
 
-        // Execute tools in parallel
+        // Execute tools sequentially (not in parallel) to avoid overlapping approval prompts
         this.updateStatus(`Executing ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`);
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
-        const toolPromises = toolCalls.map(async (toolCall) => {
+        const toolResults: Array<{ toolCall: { name: string; params: Record<string, any> }; result: any }> = [];
+
+        for (const toolCall of toolCalls) {
           // Don't show tool call details for Read tool - will show concise message instead
           if (toolCall.name !== 'Read') {
             console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
@@ -804,10 +863,11 @@ ${chalk.cyan.bold('Examples:')}
                 console.log(renderer.renderInfo(`Hook message: ${blockedResult.error}`));
               }
             }
-            return {
+            toolResults.push({
               toolCall,
               result: { success: false, error: 'Blocked by hook' },
-            };
+            });
+            continue;
           }
 
           // Check if tool requires approval
@@ -819,10 +879,11 @@ ${chalk.cyan.bold('Examples:')}
 
             if (!approvalResult.approved) {
               console.log(renderer.renderWarning(`Tool ${toolCall.name} execution cancelled`));
-              return {
+              toolResults.push({
                 toolCall,
                 result: { success: false, error: approvalResult.reason || 'User declined' },
-              };
+              });
+              continue;
             }
           }
 
@@ -848,14 +909,11 @@ ${chalk.cyan.bold('Examples:')}
           console.log(renderer.renderToolResult(toolCall.name, result.success, result.output, result.error, result.data));
           console.log('');
 
-          return {
+          toolResults.push({
             toolCall,
             result,
-          };
-        });
-
-        // Wait for all tools to complete
-        const toolResults = await Promise.all(toolPromises);
+          });
+        }
 
         // Collect all results for context
         const allResults = toolResults
@@ -916,14 +974,18 @@ ${chalk.cyan.bold('Examples:')}
         console.log('');
       }
 
-      // Add assistant response to context
+      // Add assistant response to context and history
       this.context.addMessage('assistant', fullResponse);
+      this.historyManager.addMessage('assistant', fullResponse);
 
       // Trigger assistant response hook
       await hookManager.trigger({
         event: 'assistant_response',
         assistantResponse: fullResponse,
       });
+
+      // Check if token limit is exceeded and auto-continue
+      await this.checkAndHandleTokenLimit();
 
     } catch (error: any) {
       console.log(renderer.renderError(error.message));
@@ -1072,6 +1134,53 @@ ${chalk.cyan.bold('Examples:')}
     }
 
     return uniqueToolCalls;
+  }
+
+  /**
+   * Check if token limit is exceeded and handle auto-continuation
+   */
+  private async checkAndHandleTokenLimit(): Promise<void> {
+    const config = configManager.get();
+
+    // Check if approaching or exceeded token limit
+    if (this.context.isTokenLimitExceeded()) {
+      console.log(chalk.yellow.bold('\n⚠️  Token Limit Exceeded'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.cyan('The conversation has reached the maximum token limit.'));
+      console.log(chalk.cyan('Automatically saving current conversation and starting fresh...\n'));
+
+      // Auto-save current conversation
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const sessionName = `auto-save-${timestamp}`;
+      const messages = this.context.getMessages();
+
+      try {
+        const session = sessionManager.saveSession(sessionName, messages, config.provider, config.model);
+        console.log(chalk.green(`✓ Conversation saved: ${session.name}`));
+        console.log(chalk.gray(`  Session ID: ${session.id}`));
+        console.log(chalk.gray(`  Messages saved: ${session.metadata.messageCount}`));
+        console.log(chalk.gray(`  You can load this session later with: /load ${session.id}\n`));
+      } catch (error: any) {
+        logger.error('Failed to auto-save session:', error);
+        console.log(chalk.red(`✗ Failed to auto-save session: ${error.message}\n`));
+      }
+
+      // Clear context to continue
+      this.context.clear();
+      console.log(chalk.green('✓ Context cleared - ready to continue with a fresh conversation'));
+      console.log(chalk.gray('─'.repeat(60)));
+      console.log(chalk.cyan('💡 Tip: Previous conversation history is still available in project history'));
+      console.log(chalk.cyan('    and can be accessed with /history or /sessions commands.\n'));
+
+    } else if (this.context.isApproachingTokenLimit()) {
+      // Warn when approaching limit (90% threshold)
+      const tokenCount = this.context.getTokenCount();
+      const maxTokens = config.maxContextTokens || 8000;
+      const percentage = Math.round((tokenCount / maxTokens) * 100);
+
+      console.log(chalk.yellow(`\n⚠️  Approaching token limit: ${tokenCount} / ${maxTokens} tokens (${percentage}%)`));
+      console.log(chalk.gray('   Conversation will auto-save and continue when limit is reached.\n'));
+    }
   }
 
   private parseValue(value: string): any {

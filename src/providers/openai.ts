@@ -17,7 +17,11 @@ export class OpenAIProvider implements AIProvider {
     temperature: number = 0.7,
     maxTokens: number = 4096
   ) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({
+      apiKey,
+      timeout: 600000, // 10 minutes for large file generation
+      maxRetries: 2,
+    });
     this.model = model;
     this.temperature = temperature;
     this.maxTokens = maxTokens;
