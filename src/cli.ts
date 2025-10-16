@@ -7,6 +7,7 @@ import { configManager } from './utils/config';
 import { logger } from './utils/logger';
 import { commandManager } from './utils/commands';
 import { hookManager } from './utils/hooks';
+import { artifactParser } from './utils/artifact-parser';
 import { toOpenAITools, toAnthropicTools } from './tools/converter';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -447,6 +448,23 @@ ${chalk.cyan.bold('Examples:')}
       }
 
       console.log('\n'); // New line after response
+
+      // FIRST: Detect and write file artifacts from AI response
+      const artifacts = artifactParser.parseArtifacts(fullResponse);
+      if (artifacts.length > 0) {
+        console.log(chalk.cyan(`\n📦 Detected ${artifacts.length} file artifact(s), writing to disk...\n`));
+        const artifactResult = await artifactParser.writeArtifacts(artifacts);
+
+        if (artifactResult.written > 0) {
+          // Add summary to context so AI knows files were created
+          const artifactSummary = `Created ${artifactResult.written} file(s): ${artifacts.map(a => a.filePath).join(', ')}`;
+          logger.info(artifactSummary);
+        }
+
+        if (artifactResult.errors.length > 0) {
+          console.log(renderer.renderWarning(`${artifactResult.errors.length} file(s) failed to write`));
+        }
+      }
 
       // Plan mode: if tools detected and plan mode is on, ask for approval
       if (this.planMode && toolCalls.length > 0) {

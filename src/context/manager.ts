@@ -77,9 +77,25 @@ You have access to the following tools to help with coding tasks:
 
 ${toolsDescription}
 
-# Tool Usage
+# File Creation - PREFERRED METHOD (Artifacts)
 
-When you need to use a tool, format your response like this:
+When creating or updating files, use file artifacts instead of Write tool:
+
+\`\`\`javascript src/example.js
+function hello() {
+  console.log("Hello World");
+}
+\`\`\`
+
+Format: \`\`\`<language> <filepath>
+- Files are written automatically to disk
+- No need to use Write tool
+- Show concise progress messages instead of streaming full file contents
+- Supports: .ts .js .tsx .jsx .py .java .cpp .c .h .css .html .json .md .txt .sh .yml .yaml .xml .go .rs .rb .php .sql .env
+
+# Tool Usage (For operations other than file creation)
+
+When you need to use a tool (Read, Edit, Bash, etc.), format like this:
 
 \`\`\`tool-call
 Tool: ToolName
@@ -92,12 +108,14 @@ After using a tool, you'll receive the result and can continue the conversation.
 
 # Guidelines
 
-1. Always read files before editing them
-2. Use Glob to find files, then Read to examine them
-3. Use Grep to search for specific patterns in code
-4. Provide clear explanations of what you're doing
-5. Suggest improvements when appropriate
-6. Be concise but thorough in your responses`;
+1. For creating/updating files: Use file artifacts (code blocks with filepath)
+2. For reading files: Use Read tool
+3. For editing existing files: Use Edit tool for small changes, artifacts for rewrites
+4. For finding files: Use Glob tool
+5. For searching code: Use Grep tool
+6. For bash commands: Use Bash tool
+7. Always provide clear, concise explanations
+8. Don't stream entire file contents to console - write them as artifacts`;
   }
 
   private trimContext(): void {
