@@ -776,11 +776,13 @@ ${chalk.cyan.bold('Examples:')}
           break;
         }
 
-        // Execute tools in parallel
+        // Execute tools sequentially (not in parallel) to avoid overlapping approval prompts
         this.updateStatus(`Executing ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`);
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
-        const toolPromises = toolCalls.map(async (toolCall) => {
+        const toolResults: Array<{ toolCall: { name: string; params: Record<string, any> }; result: any }> = [];
+
+        for (const toolCall of toolCalls) {
           // Don't show tool call details for Read tool - will show concise message instead
           if (toolCall.name !== 'Read') {
             console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
@@ -804,10 +806,11 @@ ${chalk.cyan.bold('Examples:')}
                 console.log(renderer.renderInfo(`Hook message: ${blockedResult.error}`));
               }
             }
-            return {
+            toolResults.push({
               toolCall,
               result: { success: false, error: 'Blocked by hook' },
-            };
+            });
+            continue;
           }
 
           // Check if tool requires approval
@@ -819,10 +822,11 @@ ${chalk.cyan.bold('Examples:')}
 
             if (!approvalResult.approved) {
               console.log(renderer.renderWarning(`Tool ${toolCall.name} execution cancelled`));
-              return {
+              toolResults.push({
                 toolCall,
                 result: { success: false, error: approvalResult.reason || 'User declined' },
-              };
+              });
+              continue;
             }
           }
 
@@ -848,14 +852,11 @@ ${chalk.cyan.bold('Examples:')}
           console.log(renderer.renderToolResult(toolCall.name, result.success, result.output, result.error, result.data));
           console.log('');
 
-          return {
+          toolResults.push({
             toolCall,
             result,
-          };
-        });
-
-        // Wait for all tools to complete
-        const toolResults = await Promise.all(toolPromises);
+          });
+        }
 
         // Collect all results for context
         const allResults = toolResults
