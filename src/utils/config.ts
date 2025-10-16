@@ -30,16 +30,13 @@ const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
 
-const DEFAULT_CONFIG: Config = {
-  provider: 'ollama',
-  model: 'codellama',
-  temperature: 0.7,
-  maxTokens: 4096,
-  maxContextTokens: 8000,
-  maxMessageTokens: 2000,
-  enableTokenShortening: true,
-  ollamaUrl: 'http://localhost:11434',
-  systemPrompt: `You are G-Coder, an AI coding assistant. You help developers with:
+// Helper function to generate platform-aware system prompt
+function getDefaultSystemPrompt(): string {
+  const platformInfo = process.platform === 'win32'
+    ? '⚠️ WINDOWS DETECTED: You MUST use CMD commands (dir, where, etc.), NOT Unix commands (find, ls, etc.). For finding files, use the Glob tool instead of bash find command.'
+    : 'Unix/Linux platform detected: Use standard bash commands.';
+
+  return `You are G-Coder, an AI coding assistant. You help developers with:
 - Writing and editing code
 - Debugging and fixing errors
 - Searching through codebases
@@ -48,6 +45,9 @@ const DEFAULT_CONFIG: Config = {
 - Explaining how code works
 
 You have access to various tools to interact with the filesystem and execute commands. Always provide clear, concise, and helpful responses.
+
+PLATFORM DETECTION: You are currently running on ${process.platform}.
+${platformInfo}
 
 CRITICAL FORMATTING RULE: When you need to use tools, you MUST use code blocks with the type "tool-call".
 DO NOT use "json", "text", or any other code block type. ONLY use "tool-call".
@@ -104,7 +104,12 @@ pattern: function handleLogin
 path: src/
 \`\`\`
 
-6. Bash - Execute shell commands
+6. Bash - Execute shell commands (cross-platform aware)
+IMPORTANT: Detect the platform and use appropriate commands:
+- Windows: Use CMD commands (dir, where, type, etc.) NOT Unix commands
+- Unix/Linux/Mac: Use bash commands (ls, find, cat, etc.)
+- Check process.platform or use cross-platform tools like Node.js commands
+- For finding files on Windows, use Glob tool instead of 'find' command
 Example:
 \`\`\`tool-call
 Tool: Bash
@@ -124,7 +129,19 @@ IMPORTANT: Use TodoWrite proactively for complex tasks. Update it frequently as 
 
 CRITICAL: You must use the exact format above with the tool-call code block, "Tool:" label, and "Parameters:" section. Do not deviate from this format or the tools will not execute.
 
-Be proactive and suggest improvements when appropriate.`,
+Be proactive and suggest improvements when appropriate.`;
+}
+
+const DEFAULT_CONFIG: Config = {
+  provider: 'ollama',
+  model: 'codellama',
+  temperature: 0.7,
+  maxTokens: 4096,
+  maxContextTokens: 8000,
+  maxMessageTokens: 2000,
+  enableTokenShortening: true,
+  ollamaUrl: 'http://localhost:11434',
+  systemPrompt: getDefaultSystemPrompt(),
 };
 
 export class ConfigManager {
