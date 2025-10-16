@@ -407,7 +407,10 @@ ${chalk.cyan.bold('Examples:')}
 
       console.log(''); // New line before response
 
-      // Stream response from provider
+      // Show spinner while AI is thinking
+      const thinkingSpinner = ora('AI is processing your request...').start();
+
+      // Stream response from provider (silent, no console output)
       let fullResponse = '';
       let toolCalls: Array<{ name: string; params: Record<string, any> }> = [];
 
@@ -425,8 +428,8 @@ ${chalk.cyan.bold('Examples:')}
 
         const response = await this.provider.chat(
           messages,
-          (chunk) => {
-            process.stdout.write(chunk);
+          () => {
+            // Silent - no streaming output
           },
           providerTools
         );
@@ -439,15 +442,20 @@ ${chalk.cyan.bold('Examples:')}
         }
       } else {
         // Fallback to regex parsing for providers without native support (like Ollama)
-        fullResponse = await this.provider.chat(messages, (chunk) => {
-          process.stdout.write(chunk);
+        fullResponse = await this.provider.chat(messages, () => {
+          // Silent - no streaming output
         }) as string;
 
         // Parse tool calls from response text
         toolCalls = this.parseToolCalls(fullResponse);
       }
 
-      console.log('\n'); // New line after response
+      thinkingSpinner.succeed('AI response received');
+
+      // Log full response for debugging
+      logger.debug('=== Full AI Response ===');
+      logger.debug(fullResponse);
+      logger.debug('=== End AI Response ===');
 
       // FIRST: Detect and write file artifacts from AI response
       const artifacts = artifactParser.parseArtifacts(fullResponse);
@@ -566,10 +574,12 @@ ${chalk.cyan.bold('Examples:')}
           // Get AI response to all tool results
           const followUpMessages = this.context.getAIMessages();
 
+          const followUpSpinner = ora('AI analyzing tool results...').start();
+
           let followUpResponse: string;
           if (this.provider.supportsNativeTools) {
-            const response = await this.provider.chat(followUpMessages, (chunk) => {
-              process.stdout.write(chunk);
+            const response = await this.provider.chat(followUpMessages, () => {
+              // Silent - no streaming output
             });
 
             if (typeof response === 'string') {
@@ -580,15 +590,15 @@ ${chalk.cyan.bold('Examples:')}
               toolCalls = response.toolCalls || [];
             }
           } else {
-            followUpResponse = await this.provider.chat(followUpMessages, (chunk) => {
-              process.stdout.write(chunk);
+            followUpResponse = await this.provider.chat(followUpMessages, () => {
+              // Silent - no streaming output
             }) as string;
 
             // Check for more tool calls in the follow-up response
             toolCalls = this.parseToolCalls(followUpResponse);
           }
 
-          console.log('\n');
+          followUpSpinner.succeed('Follow-up analysis complete');
           fullResponse += '\n' + followUpResponse;
         } else {
           // No results to process, stop the loop
@@ -600,6 +610,14 @@ ${chalk.cyan.bold('Examples:')}
       if (iterationCount >= MAX_TOOL_ITERATIONS) {
         console.log(renderer.renderWarning(`\n⚠️  Reached maximum tool execution iterations (${MAX_TOOL_ITERATIONS}) - stopping`));
         console.log(renderer.renderInfo(`This prevents infinite loops. The AI may not have completed all intended actions.`));
+      }
+
+      // Display AI summary (extract text without artifact code blocks)
+      const summaryText = artifactParser.extractTextWithoutArtifacts(fullResponse);
+      if (summaryText.trim()) {
+        console.log(chalk.cyan('\n📝 Summary:'));
+        console.log(summaryText.trim());
+        console.log('');
       }
 
       // Add assistant response to context

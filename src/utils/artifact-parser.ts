@@ -13,39 +13,98 @@ export interface FileArtifact {
 export class ArtifactParser {
   /**
    * Parse AI response for file artifacts in code blocks
-   * Format: ```filepath:path/to/file.ext or ```language filepath:path/to/file.ext
+   * Format: ```language path/to/file.ext
    */
   parseArtifacts(response: string): FileArtifact[] {
     const artifacts: FileArtifact[] = [];
 
-    // Match code blocks with file paths
-    // Supports: ```filepath:... or ```javascript filepath:... or ```js path/to/file.js
-    const artifactRegex = /```(?:(\w+)\s+)?(?:filepath:)?([^\n]+?\.(ts|js|tsx|jsx|py|java|cpp|c|h|css|html|json|md|txt|sh|yml|yaml|xml|go|rs|rb|php|sql|env))\n([\s\S]*?)```/gi;
+    logger.info('Parsing response for artifacts...');
+    logger.debug(`Response length: ${response.length} chars`);
 
-    let match;
-    while ((match = artifactRegex.exec(response)) !== null) {
-      const language = match[1];
-      const filePath = match[2].trim();
-      const content = match[4];
+    // Split response by ``` markers to properly handle nested backticks
+    const blocks = this.extractCodeBlocks(response);
 
-      // Skip if it looks like a tool-call block
-      if (content.includes('Tool:') && content.includes('Parameters:')) {
-        continue;
+    logger.info(`Found ${blocks.length} code block(s)`);
+
+    for (const block of blocks) {
+      // Check if block header contains a file path
+      const headerMatch = block.header.match(/^(\w+)?\s*([^\s]+\.(ts|js|tsx|jsx|py|java|cpp|c|h|css|html|json|md|txt|sh|yml|yaml|xml|go|rs|rb|php|sql|env))$/i);
+
+      if (headerMatch) {
+        const language = headerMatch[1];
+        const filePath = headerMatch[2].trim();
+        const content = block.content;
+
+        // Skip if it looks like a tool-call block
+        if (content.includes('Tool:') && content.includes('Parameters:')) {
+          logger.debug(`Skipping tool-call block: ${filePath}`);
+          continue;
+        }
+
+        // Determine if file exists
+        const resolvedPath = path.resolve(filePath);
+        const action = fs.existsSync(resolvedPath) ? 'update' : 'create';
+
+        logger.info(`Found artifact: ${filePath} (${content.length} chars)`);
+
+        artifacts.push({
+          filePath,
+          content,
+          language,
+          action,
+        });
       }
+    }
 
-      // Determine if file exists
-      const resolvedPath = path.resolve(filePath);
-      const action = fs.existsSync(resolvedPath) ? 'update' : 'create';
+    logger.info(`Parsed ${artifacts.length} artifact(s)`);
+    return artifacts;
+  }
 
-      artifacts.push({
-        filePath,
-        content,
-        language,
-        action,
+  /**
+   * Extract code blocks from response by properly handling ``` markers
+   */
+  private extractCodeBlocks(response: string): Array<{ header: string; content: string }> {
+    const blocks: Array<{ header: string; content: string }> = [];
+    const lines = response.split('\n');
+
+    let inBlock = false;
+    let currentHeader = '';
+    let currentContent: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (line.startsWith('```')) {
+        if (!inBlock) {
+          // Opening block
+          inBlock = true;
+          currentHeader = line.substring(3).trim();
+          currentContent = [];
+        } else {
+          // Closing block
+          inBlock = false;
+          blocks.push({
+            header: currentHeader,
+            content: currentContent.join('\n'),
+          });
+          currentHeader = '';
+          currentContent = [];
+        }
+      } else if (inBlock) {
+        currentContent.push(line);
+      }
+    }
+
+    // Handle unclosed block
+    if (inBlock && currentContent.length > 0) {
+      logger.warn('Found unclosed code block - file may be incomplete');
+      blocks.push({
+        header: currentHeader,
+        content: currentContent.join('\n'),
       });
     }
 
-    return artifacts;
+    return blocks;
   }
 
   /**
