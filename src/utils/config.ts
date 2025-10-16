@@ -14,6 +14,11 @@ export interface Config {
   maxTokens: number;
   systemPrompt: string;
 
+  // Token management settings
+  maxContextTokens?: number;
+  maxMessageTokens?: number;
+  enableTokenShortening?: boolean;
+
   // Provider-specific settings
   ollamaUrl?: string;
   openaiApiKey?: string;
@@ -30,6 +35,9 @@ const DEFAULT_CONFIG: Config = {
   model: 'codellama',
   temperature: 0.7,
   maxTokens: 4096,
+  maxContextTokens: 8000,
+  maxMessageTokens: 2000,
+  enableTokenShortening: true,
   ollamaUrl: 'http://localhost:11434',
   systemPrompt: `You are G-Coder, an AI coding assistant. You help developers with:
 - Writing and editing code

@@ -32,7 +32,12 @@ export class CLI {
       maxTokens: config.maxTokens,
     });
 
-    this.context = new ContextManager(config.systemPrompt);
+    this.context = new ContextManager(config.systemPrompt, 20, {
+      maxContextTokens: config.maxContextTokens,
+      maxMessageTokens: config.maxMessageTokens,
+      enableTokenShortening: config.enableTokenShortening,
+      modelName: config.model,
+    });
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -74,7 +79,7 @@ export class CLI {
 
     // Display Sanskrit blessing at the top
     const blessing = `
-                      श्री गणेशाय नाम:
+                      श्री गणेशाय नम:
 
            मङ्गलम् भगवान विष्णुः, मङ्गलम् गरुणध्वजः।
            मङ्गलम् पुण्डरी काक्षः, मङ्गलाय तनो हरिः॥
@@ -191,7 +196,14 @@ export class CLI {
         break;
 
       case 'context':
+        const tokenCount = this.context.getTokenCount();
+        const contextConfig = configManager.get();
         console.log(renderer.renderInfo(`Context size: ${this.context.getContextSize()} messages`));
+        if (tokenCount > 0) {
+          const maxTokens = contextConfig.maxContextTokens || 8000;
+          const percentage = Math.round((tokenCount / maxTokens) * 100);
+          console.log(renderer.renderInfo(`Token count: ${tokenCount} / ${maxTokens} (${percentage}%)`));
+        }
         break;
 
       case 'tools':
@@ -264,9 +276,9 @@ export class CLI {
 
       case 'config':
         console.log(renderer.renderHeader('Configuration'));
-        const config = configManager.get();
+        const currentConfig = configManager.get();
         // Hide API keys in output
-        const displayConfig = { ...config };
+        const displayConfig = { ...currentConfig };
         if (displayConfig.openaiApiKey) displayConfig.openaiApiKey = '***';
         if (displayConfig.anthropicApiKey) displayConfig.anthropicApiKey = '***';
         if (displayConfig.deepseekApiKey) displayConfig.deepseekApiKey = '***';
@@ -384,8 +396,13 @@ ${chalk.cyan.bold('Examples:')}
       // Add user message to context
       this.context.addMessage('user', input);
 
+      // Track tool execution to prevent infinite loops
+      const executedTools: string[] = [];
+      const MAX_TOOL_ITERATIONS = 10;
+      let iterationCount = 0;
+
       // Get messages for AI provider
-      const messages = this.context.getAIMessages();
+      let messages = this.context.getAIMessages();
 
       console.log(''); // New line before response
 
@@ -444,12 +461,28 @@ ${chalk.cyan.bold('Examples:')}
         return;
       }
 
-      if (toolCalls.length > 0) {
+      // Tool execution loop with safeguards
+      while (toolCalls.length > 0 && iterationCount < MAX_TOOL_ITERATIONS) {
+        iterationCount++;
+
+        // Check for repeated tool calls (potential infinite loop)
+        const toolSignatures = toolCalls.map(tc => `${tc.name}:${JSON.stringify(tc.params)}`);
+        const repeatedTools = toolSignatures.filter(sig => executedTools.includes(sig));
+
+        if (repeatedTools.length > 0) {
+          console.log(renderer.renderWarning(`\n⚠️  Detected repeated tool execution - stopping to prevent infinite loop`));
+          console.log(renderer.renderInfo(`The AI tried to execute the same tool(s) multiple times with identical parameters.`));
+          break;
+        }
+
         // Execute tools in parallel
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
         const toolPromises = toolCalls.map(async (toolCall) => {
           console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
+
+          // Track this tool execution
+          executedTools.push(`${toolCall.name}:${JSON.stringify(toolCall.params)}`);
 
           // Trigger tool_call hook
           const callHook = await hookManager.trigger({
@@ -520,16 +553,35 @@ ${chalk.cyan.bold('Examples:')}
             const response = await this.provider.chat(followUpMessages, (chunk) => {
               process.stdout.write(chunk);
             });
-            followUpResponse = typeof response === 'string' ? response : response.content;
+
+            if (typeof response === 'string') {
+              followUpResponse = response;
+              toolCalls = []; // No more tool calls
+            } else {
+              followUpResponse = response.content;
+              toolCalls = response.toolCalls || [];
+            }
           } else {
             followUpResponse = await this.provider.chat(followUpMessages, (chunk) => {
               process.stdout.write(chunk);
             }) as string;
+
+            // Check for more tool calls in the follow-up response
+            toolCalls = this.parseToolCalls(followUpResponse);
           }
 
           console.log('\n');
           fullResponse += '\n' + followUpResponse;
+        } else {
+          // No results to process, stop the loop
+          toolCalls = [];
         }
+      }
+
+      // Warn if we hit the iteration limit
+      if (iterationCount >= MAX_TOOL_ITERATIONS) {
+        console.log(renderer.renderWarning(`\n⚠️  Reached maximum tool execution iterations (${MAX_TOOL_ITERATIONS}) - stopping`));
+        console.log(renderer.renderInfo(`This prevents infinite loops. The AI may not have completed all intended actions.`));
       }
 
       // Add assistant response to context

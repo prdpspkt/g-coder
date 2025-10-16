@@ -1,14 +1,36 @@
 import { AIMessage } from '../providers/types';
 import { toolRegistry } from '../tools';
+import { Tokenizer } from '../utils/tokenizer';
 
 export class ContextManager {
   private messages: AIMessage[] = [];
   private systemPrompt: string;
   private maxContextLength: number;
+  private tokenizer: Tokenizer | null = null;
+  private maxContextTokens: number;
+  private maxMessageTokens: number;
+  private enableTokenShortening: boolean;
 
-  constructor(systemPrompt: string, maxContextLength: number = 20) {
+  constructor(
+    systemPrompt: string,
+    maxContextLength: number = 20,
+    options: {
+      maxContextTokens?: number;
+      maxMessageTokens?: number;
+      enableTokenShortening?: boolean;
+      modelName?: string;
+    } = {}
+  ) {
     this.systemPrompt = systemPrompt;
     this.maxContextLength = maxContextLength;
+    this.maxContextTokens = options.maxContextTokens || 8000; // Default: 8k tokens
+    this.maxMessageTokens = options.maxMessageTokens || 2000; // Default: 2k tokens per message
+    this.enableTokenShortening = options.enableTokenShortening ?? true; // Default: enabled
+
+    // Initialize tokenizer if shortening is enabled
+    if (this.enableTokenShortening) {
+      this.tokenizer = new Tokenizer(options.modelName || 'gpt-4');
+    }
   }
 
   addMessage(role: 'user' | 'assistant', content: string): void {
@@ -30,7 +52,18 @@ export class ContextManager {
       content: this.buildSystemPrompt(),
     };
 
-    return [systemMessage, ...this.messages];
+    const allMessages = [systemMessage, ...this.messages];
+
+    // Apply token-based shortening if enabled
+    if (this.enableTokenShortening && this.tokenizer) {
+      return this.tokenizer.shortenMessages(
+        allMessages,
+        this.maxContextTokens,
+        this.maxMessageTokens
+      );
+    }
+
+    return allMessages;
   }
 
   private buildSystemPrompt(): string {
@@ -86,6 +119,42 @@ After using a tool, you'll receive the result and can continue the conversation.
     return this.messages.length;
   }
 
+  /**
+   * Get the estimated token count for the current context
+   */
+  getTokenCount(): number {
+    if (!this.tokenizer) {
+      return 0;
+    }
+
+    const allMessages = this.getAIMessages();
+    return this.tokenizer.countMessagesTokens(allMessages);
+  }
+
+  /**
+   * Update token shortening settings
+   */
+  setTokenLimits(maxContextTokens: number, maxMessageTokens?: number): void {
+    this.maxContextTokens = maxContextTokens;
+    if (maxMessageTokens !== undefined) {
+      this.maxMessageTokens = maxMessageTokens;
+    }
+  }
+
+  /**
+   * Enable or disable token-based shortening
+   */
+  setTokenShortening(enabled: boolean, modelName?: string): void {
+    this.enableTokenShortening = enabled;
+
+    if (enabled && !this.tokenizer) {
+      this.tokenizer = new Tokenizer(modelName || 'gpt-4');
+    } else if (!enabled && this.tokenizer) {
+      this.tokenizer.free();
+      this.tokenizer = null;
+    }
+  }
+
   exportContext(): string {
     return JSON.stringify({
       systemPrompt: this.systemPrompt,
@@ -100,6 +169,16 @@ After using a tool, you'll receive the result and can continue the conversation.
       this.messages = data.messages || [];
     } catch (error) {
       throw new Error('Failed to import context: invalid format');
+    }
+  }
+
+  /**
+   * Clean up resources
+   */
+  destroy(): void {
+    if (this.tokenizer) {
+      this.tokenizer.free();
+      this.tokenizer = null;
     }
   }
 }
