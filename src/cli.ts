@@ -589,7 +589,10 @@ ${chalk.cyan.bold('Examples:')}
         console.log(chalk.cyan(`\nExecuting ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...\n`));
 
         const toolPromises = toolCalls.map(async (toolCall) => {
-          console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
+          // Don't show tool call details for Read tool - will show concise message instead
+          if (toolCall.name !== 'Read') {
+            console.log(renderer.renderToolCall(toolCall.name, toolCall.params));
+          }
 
           // Track this tool execution
           executedTools.push(`${toolCall.name}:${JSON.stringify(toolCall.params)}`);
