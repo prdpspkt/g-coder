@@ -81,9 +81,8 @@ export class Renderer {
           break;
 
         case 'Read':
-          summary = data?.path
-            ? `Read: ${chalk.cyan(data.path)} (${data.readLines || 0} lines)`
-            : 'File read successfully';
+          // For Read tool, don't show success summary since the file content is the output
+          return chalk.green('✓') + chalk.gray(' File read successfully');
           break;
 
         case 'Edit':
