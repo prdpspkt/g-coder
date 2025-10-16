@@ -1,6 +1,6 @@
 {
   "name": "@prdpspkt/g-coder",
-  "version": "2.0.7",
+  "version": "2.0.9",
   "description": "AI-powered CLI coding assistant supporting Ollama, OpenAI, Claude, DeepSeek and more",
   "main": "dist/index.js",
   "bin": {
@@ -24,7 +24,7 @@
   "author": "prdpspkt",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.1",
+    "@anthropic-ai/sdk": "^0.66.0",
     "axios": "^1.6.2",
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
