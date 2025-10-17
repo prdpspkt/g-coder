@@ -147,7 +147,7 @@ export class CLI {
     console.log(chalk.gray('Tip: Paste multi-line code/errors naturally - submit with double Enter\n'));
 
     this.setupHandlers();
-    this.rl.prompt();
+    this.promptWithStatus();
   }
 
   private showConnectionHelp(): void {
@@ -193,7 +193,7 @@ export class CLI {
           if (multiLineInput.trim()) {
             await this.processUserInput(multiLineInput);
           }
-          this.rl.prompt();
+          this.promptWithStatus();
           return;
         }
 
@@ -205,7 +205,7 @@ export class CLI {
 
       // If empty line when not in multi-line mode, just reprompt
       if (!trimmed) {
-        this.rl.prompt();
+        this.promptWithStatus();
         return;
       }
 
@@ -220,7 +220,7 @@ export class CLI {
       // Handle commands (single-line only)
       if (trimmed.startsWith('/')) {
         await this.handleCommand(trimmed);
-        this.rl.prompt();
+        this.promptWithStatus();
         return;
       }
 
@@ -241,7 +241,7 @@ export class CLI {
 
       // Process single-line input
       await this.processUserInput(trimmed);
-      this.rl.prompt();
+      this.promptWithStatus();
     });
 
     this.rl.on('close', async () => {
@@ -324,6 +324,7 @@ export class CLI {
    */
   private resumeInput(): void {
     this.rl.resume();
+    this.promptWithStatus();
   }
 
   /**
@@ -354,6 +355,35 @@ export class CLI {
       clearInterval(this.statusInterval);
       this.statusInterval = null;
     }
+  }
+
+  /**
+   * Show status bar with model info and modes
+   */
+  private showStatusBar(): void {
+    const config = configManager.get();
+    const tokenCount = this.context.getTokenCount();
+    const maxTokens = config.maxContextTokens || 8000;
+
+    const statusBar = renderer.renderStatusBar({
+      model: config.model,
+      provider: config.provider,
+      planMode: this.planMode,
+      bossMode: this.bossMode,
+      multiLineMode: this.isMultiLineMode,
+      tokenCount: tokenCount > 0 ? tokenCount : undefined,
+      maxTokens: tokenCount > 0 ? maxTokens : undefined,
+    });
+
+    console.log('\n' + statusBar);
+  }
+
+  /**
+   * Show status bar and prompt for input
+   */
+  private promptWithStatus(): void {
+    this.showStatusBar();
+    this.rl.prompt();
   }
 
   private async handleCommand(command: string): Promise<void> {
