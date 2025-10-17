@@ -34,6 +34,7 @@ export class CLI {
   private isMultiLineMode: boolean = false;
   private codeBlockMarker: string = '';
   private bossMode: boolean = false;
+  private shouldStopExecution: boolean = false;
 
   constructor() {
     const config = configManager.get();
@@ -991,6 +992,8 @@ ${chalk.cyan.bold('Examples:')}
 
         const toolResults: Array<{ toolCall: { name: string; params: Record<string, any> }; result: any }> = [];
 
+        let userCancelled = false;
+
         for (const toolCall of toolCalls) {
           // Don't show tool call details for Read tool - will show concise message instead
           if (toolCall.name !== 'Read') {
@@ -1030,12 +1033,9 @@ ${chalk.cyan.bold('Examples:')}
             });
 
             if (!approvalResult.approved) {
-              console.log(renderer.renderWarning(`Tool ${toolCall.name} execution cancelled`));
-              toolResults.push({
-                toolCall,
-                result: { success: false, error: approvalResult.reason || 'User declined' },
-              });
-              continue;
+              console.log(chalk.yellow('Execution stopped. Please provide new instructions.'));
+              userCancelled = true;
+              break;
             }
           }
 
@@ -1065,6 +1065,11 @@ ${chalk.cyan.bold('Examples:')}
             toolCall,
             result,
           });
+        }
+
+        // If user cancelled, stop all execution and return
+        if (userCancelled) {
+          break;
         }
 
         // Collect all results for context

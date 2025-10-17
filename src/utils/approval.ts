@@ -267,50 +267,25 @@ export class ApprovalManager {
       return { approved: true, reason: 'Auto-approved by pattern' };
     }
 
-    // Assess risk
-    const risk = this.assessRisk(request.toolName, request.params);
+    // Format the command for display
+    const commandDisplay = this.formatCommandForDisplay(request.toolName, request.params);
 
-    // Display approval prompt
-    console.log('\n' + chalk.bold.yellow('⚠ Tool Execution Approval Required'));
-    console.log(chalk.dim('─'.repeat(60)));
-    console.log(chalk.bold('Tool:'), chalk.cyan(request.toolName));
+    // Display simplified approval prompt
+    console.log('\n' + chalk.cyan(`G-coder wants to run '${commandDisplay}'.`));
+    console.log('');
 
-    if (request.description) {
-      console.log(chalk.bold('Description:'), request.description);
-    }
-
-    // Show risk level
-    const riskColors = {
-      low: chalk.green,
-      medium: chalk.yellow,
-      high: chalk.red,
-      critical: chalk.bold.red,
-    };
-    console.log(chalk.bold('Risk Level:'), riskColors[risk.level](risk.level.toUpperCase()));
-
-    if (risk.warnings.length > 0) {
-      console.log(chalk.bold('Warnings:'));
-      risk.warnings.forEach(warning => {
-        console.log(chalk.red('  ⚠ ' + warning));
-      });
-    }
-
-    console.log(chalk.bold('\nParameters:'));
-    console.log(this.formatParams(request.params));
-    console.log(chalk.dim('─'.repeat(60)));
-
-    // Prompt for approval
+    // Prompt for approval with three simple options
     const { approval } = await inquirer.prompt([
       {
         type: 'list',
         name: 'approval',
-        message: 'Do you want to execute this tool?',
+        message: 'Choose an option:',
         choices: [
-          { name: 'Yes, execute', value: 'yes' },
-          { name: 'No, cancel', value: 'no' },
-          { name: 'Yes, and auto-approve similar operations', value: 'auto' },
+          { name: 'Yes, proceed.', value: 'yes' },
+          { name: 'Yes, auto approve same tool for this session.', value: 'auto' },
+          { name: 'No, I want it done differently.', value: 'no' },
         ],
-        default: risk.level === 'critical' ? 'no' : 'yes',
+        default: 'yes',
       },
     ]);
 
@@ -330,16 +305,43 @@ export class ApprovalManager {
         this.config.autoApprovePatterns = [];
       }
       this.config.autoApprovePatterns.push(signature);
-      console.log(chalk.dim('  ℹ Future similar operations will be auto-approved'));
+      console.log(chalk.dim('\n  ℹ Future similar operations will be auto-approved for this session'));
     }
 
     if (!approved) {
-      console.log(chalk.yellow('  ✗ Tool execution cancelled by user\n'));
+      console.log('');
       return { approved: false, reason: 'User declined' };
     }
 
-    console.log(chalk.green('  ✓ Tool execution approved\n'));
+    console.log('');
     return { approved: true };
+  }
+
+  /**
+   * Format command for simplified display
+   */
+  private formatCommandForDisplay(toolName: string, params: Record<string, any>): string {
+    if (toolName === 'Bash') {
+      return params.command || 'bash command';
+    }
+
+    if (toolName === 'Write') {
+      const fileName = params.file_path ? params.file_path.split(/[\\/]/).pop() : 'file';
+      return `write to ${fileName}`;
+    }
+
+    if (toolName === 'Edit') {
+      const fileName = params.file_path ? params.file_path.split(/[\\/]/).pop() : 'file';
+      return `edit ${fileName}`;
+    }
+
+    if (toolName === 'Read') {
+      const fileName = params.file_path ? params.file_path.split(/[\\/]/).pop() : 'file';
+      return `read ${fileName}`;
+    }
+
+    // Default format for other tools
+    return `${toolName.toLowerCase()} operation`;
   }
 
   /**
