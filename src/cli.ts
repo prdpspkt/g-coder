@@ -143,7 +143,8 @@ export class CLI {
       console.log('');
     }
 
-    console.log(renderer.renderInfo('Type "exit" to quit, "/help" for commands\n'));
+    console.log(renderer.renderInfo('Type "exit" to quit, "/help" for commands'));
+    console.log(chalk.gray('Tip: Paste multi-line code/errors naturally - submit with double Enter\n'));
 
     this.setupHandlers();
     this.rl.prompt();
@@ -179,23 +180,14 @@ export class CLI {
     this.rl.on('line', async (input: string) => {
       const trimmed = input.trim();
 
-      // Check for code block markers (```)
-      if (trimmed === '```' || trimmed.startsWith('```')) {
-        if (!this.isMultiLineMode) {
-          // Enter multi-line mode
-          this.isMultiLineMode = true;
-          this.codeBlockMarker = trimmed;
-          this.multiLineBuffer = [];
-          console.log(chalk.gray('Entering multi-line mode. Paste your code. Type ``` on a new line to finish.'));
-          this.rl.setPrompt(chalk.gray('... '));
-          this.rl.prompt();
-          return;
-        } else {
-          // Exit multi-line mode
+      // If in multi-line mode
+      if (this.isMultiLineMode) {
+        // Check for empty line to submit (double Enter)
+        if (trimmed === '') {
+          // Submit the buffered input
           this.isMultiLineMode = false;
           const multiLineInput = this.multiLineBuffer.join('\n');
           this.multiLineBuffer = [];
-          this.codeBlockMarker = '';
           this.rl.setPrompt(renderer.renderPrompt());
 
           if (multiLineInput.trim()) {
@@ -204,15 +196,14 @@ export class CLI {
           this.rl.prompt();
           return;
         }
-      }
 
-      // If in multi-line mode, accumulate input
-      if (this.isMultiLineMode) {
+        // Accumulate the line
         this.multiLineBuffer.push(input);
         this.rl.prompt();
         return;
       }
 
+      // If empty line when not in multi-line mode, just reprompt
       if (!trimmed) {
         this.rl.prompt();
         return;
@@ -226,7 +217,7 @@ export class CLI {
         return; // Don't show prompt during processing
       }
 
-      // Handle commands
+      // Handle commands (single-line only)
       if (trimmed.startsWith('/')) {
         await this.handleCommand(trimmed);
         this.rl.prompt();
@@ -239,6 +230,16 @@ export class CLI {
         process.exit(0);
       }
 
+      // Check if input looks incomplete and should trigger multi-line mode
+      if (this.shouldEnterMultiLineMode(input)) {
+        this.isMultiLineMode = true;
+        this.multiLineBuffer = [input];
+        this.rl.setPrompt(chalk.gray('│ '));
+        this.rl.prompt();
+        return;
+      }
+
+      // Process single-line input
       await this.processUserInput(trimmed);
       this.rl.prompt();
     });
@@ -248,6 +249,67 @@ export class CLI {
       await hookManager.trigger({ event: 'session_end' });
       process.exit(0);
     });
+  }
+
+  /**
+   * Determine if input should trigger multi-line mode
+   * Detects incomplete input like code blocks, error traces, unclosed brackets, etc.
+   */
+  private shouldEnterMultiLineMode(input: string): boolean {
+    const trimmed = input.trim();
+
+    // Code block start (``` with language)
+    if (trimmed.startsWith('```')) {
+      return true;
+    }
+
+    // Common error trace patterns
+    const errorPatterns = [
+      /^Error:/i,
+      /^TypeError:/i,
+      /^SyntaxError:/i,
+      /^ReferenceError:/i,
+      /^RangeError:/i,
+      /Exception in thread/,
+      /^\s*at\s+/,  // Stack trace lines
+      /^\s*\^\s*$/,  // Caret pointing to error
+      /Traceback \(most recent call last\):/,
+    ];
+
+    for (const pattern of errorPatterns) {
+      if (pattern.test(input)) {
+        return true;
+      }
+    }
+
+    // Unclosed brackets/braces/parentheses
+    const openBrackets = (input.match(/[\(\[\{]/g) || []).length;
+    const closeBrackets = (input.match(/[\)\]\}]/g) || []).length;
+    if (openBrackets > closeBrackets) {
+      return true;
+    }
+
+    // Line ends with common continuation indicators
+    const continuationPatterns = [
+      /,\s*$/,       // Ends with comma
+      /\{\s*$/,      // Ends with opening brace
+      /\[\s*$/,      // Ends with opening bracket
+      /\(\s*$/,      // Ends with opening paren
+      /=\s*$/,       // Ends with assignment
+      /:\s*$/,       // Ends with colon (Python, JS objects)
+      /\\\s*$/,      // Ends with backslash continuation
+      /&&\s*$/,      // Ends with AND
+      /\|\|\s*$/,    // Ends with OR
+      /\.\s*$/,      // Ends with dot (chaining)
+    ];
+
+    for (const pattern of continuationPatterns) {
+      if (pattern.test(input)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -711,9 +773,12 @@ ${chalk.cyan.bold('Session Management:')}
   ${chalk.yellow('/delete-session <name-or-id>')} - Delete a session
 
 ${chalk.cyan.bold('Multi-line Input:')}
-  ${chalk.yellow('```')}                  - Start multi-line mode (paste code blocks)
-  ${chalk.yellow('```')}                  - End multi-line mode and submit
-  Use this to paste large code snippets without line-by-line processing
+  Automatically enters multi-line mode when pasting:
+  - Code blocks starting with ${chalk.yellow('```')}
+  - Error traces and stack traces
+  - Code with unclosed brackets/braces
+  - Lines ending with continuation characters (comma, colon, etc.)
+  ${chalk.gray('Submit multi-line input:')} Press ${chalk.yellow('Enter')} twice (empty line)
 
 ${chalk.cyan.bold('Providers:')}
   ${chalk.green('ollama')}       - Local Ollama models (default)
