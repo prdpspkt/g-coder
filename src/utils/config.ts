@@ -4,10 +4,19 @@ import * as os from 'os';
 import * as dotenv from 'dotenv';
 import { ProviderType } from '../providers/types';
 import { ApprovalConfig, createDefaultApprovalConfig } from './approval';
+import { logger } from './logger';
 
 const CONFIG_DIR = path.join(os.homedir(), '.g-coder');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
+
+class ConfigError extends Error {
+  constructor(operation: string, cause: Error | unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Failed to ${operation}: ${message}`);
+    this.name = 'ConfigError';
+  }
+}
 
 // Load environment variables from .env file in ~/.g-coder
 dotenv.config({ path: ENV_FILE });
@@ -64,9 +73,10 @@ export class ConfigManager {
       config = this.applyEnvVariables(config);
 
       return config;
-    } catch (error: any) {
-      console.error('Failed to load configuration:', error.message);
-      throw error;
+    } catch (error) {
+      const configError = new ConfigError('load configuration', error);
+      logger.error(configError.message);
+      throw configError;
     }
   }
 
@@ -104,7 +114,9 @@ export class ConfigManager {
 
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(configToSave, null, 2));
     } catch (error) {
-      console.error('Failed to save config:', error);
+      const configError = new ConfigError('save config', error);
+      logger.error(configError.message);
+      throw configError;
     }
   }
 
@@ -168,7 +180,9 @@ export class ConfigManager {
 
       fs.writeFileSync(ENV_FILE, lines.join('\n'));
     } catch (error) {
-      console.error('Failed to update .env file:', error);
+      const configError = new ConfigError('update .env file', error);
+      logger.error(configError.message);
+      throw configError;
     }
   }
 

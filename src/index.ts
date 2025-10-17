@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import chalk from 'chalk';
 import { CLI } from './cli';
 import { configManager } from './utils/config';
 import { logger, LogLevel } from './utils/logger';
@@ -120,7 +121,5 @@ program.action(async () => {
   const cli = new CLI();
   await cli.start();
 });
-
-import chalk from 'chalk';
 
 program.parse();

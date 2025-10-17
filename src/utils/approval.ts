@@ -226,28 +226,32 @@ export class ApprovalManager {
   }
 
   /**
+   * Pattern matching table for risk assessment
+   */
+  private static readonly RISK_PATTERNS = [
+    // Critical patterns
+    { keywords: ['rm.*-rf.*\\/', 'format', 'mkfs', 'dev\\/sd', 'diskpart', 'dd.*if='],
+      message: 'Critical destructive operation', level: 'critical' as const },
+
+    // High risk patterns
+    { keywords: ['rm.*-rf', 'del.*\\/s', 'rmdir.*\\/s', 'sudo', 'reg.*delete', 'kill.*-9', 'shutdown', 'taskkill.*\\/f'],
+      message: 'High-risk destructive operation', level: 'high' as const },
+
+    // Medium risk patterns
+    { keywords: ['chmod.*777', 'eval', 'exec', 'curl.*\\|', 'wget.*\\|', 'iex'],
+      message: 'Potentially unsafe operation', level: 'medium' as const },
+  ];
+
+  /**
    * Get warning details for a specific pattern match
    */
   private getWarningForPattern(pattern: RegExp, command: string): { message: string; level: 'low' | 'medium' | 'high' | 'critical' } | null {
     const patternStr = pattern.source.toLowerCase();
 
-    // Critical patterns
-    if (patternStr.includes('rm.*-rf.*\\/') || patternStr.includes('format') || patternStr.includes('mkfs') ||
-        patternStr.includes('dev\\/sd') || patternStr.includes('diskpart') || patternStr.includes('dd.*if=')) {
-      return { message: 'Critical destructive operation', level: 'critical' };
-    }
-
-    // High risk patterns
-    if (patternStr.includes('rm.*-rf') || patternStr.includes('del.*\\/s') || patternStr.includes('rmdir.*\\/s') ||
-        patternStr.includes('sudo') || patternStr.includes('reg.*delete') || patternStr.includes('kill.*-9') ||
-        patternStr.includes('shutdown') || patternStr.includes('taskkill.*\\/f')) {
-      return { message: 'High-risk destructive operation', level: 'high' };
-    }
-
-    // Medium risk patterns
-    if (patternStr.includes('chmod.*777') || patternStr.includes('eval') || patternStr.includes('exec') ||
-        patternStr.includes('curl.*\\|') || patternStr.includes('wget.*\\|') || patternStr.includes('iex')) {
-      return { message: 'Potentially unsafe operation', level: 'medium' };
+    for (const riskPattern of ApprovalManager.RISK_PATTERNS) {
+      if (riskPattern.keywords.some(keyword => patternStr.includes(keyword))) {
+        return { message: riskPattern.message, level: riskPattern.level };
+      }
     }
 
     return null;

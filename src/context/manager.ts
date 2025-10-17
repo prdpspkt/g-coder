@@ -233,6 +233,70 @@ After using a tool, you'll receive the result and can continue the conversation.
   }
 
   /**
+   * Compact conversation by summarizing older messages
+   * Keeps recent messages intact and replaces older ones with a summary
+   */
+  async compactConversation(provider: any, keepRecentCount: number = 10): Promise<{success: boolean; messagesBefore: number; messagesAfter: number; summary?: string}> {
+    const messageCount = this.messages.length;
+
+    // Not enough messages to compact
+    if (messageCount <= keepRecentCount) {
+      return {
+        success: false,
+        messagesBefore: messageCount,
+        messagesAfter: messageCount
+      };
+    }
+
+    // Split messages into old (to summarize) and recent (to keep)
+    const messagesToSummarize = this.messages.slice(0, -keepRecentCount);
+    const recentMessages = this.messages.slice(-keepRecentCount);
+
+    // Create a summary prompt
+    const conversationText = messagesToSummarize
+      .map(msg => `${msg.role}: ${msg.content}`)
+      .join('\n\n');
+
+    const summaryPrompt = `Please provide a concise summary of the following conversation history. Focus on key points, decisions made, and important context that should be preserved. Keep it under 500 words.
+
+Conversation:
+${conversationText}
+
+Summary:`;
+
+    try {
+      // Get summary from AI
+      const summary = await provider.chat([
+        { role: 'user', content: summaryPrompt }
+      ], () => {});
+
+      const summaryContent = typeof summary === 'string' ? summary : summary.content;
+
+      // Replace old messages with summary
+      this.messages = [
+        {
+          role: 'system',
+          content: `[Previous Conversation Summary]\n${summaryContent}\n[End of Summary]`
+        },
+        ...recentMessages
+      ];
+
+      return {
+        success: true,
+        messagesBefore: messageCount,
+        messagesAfter: this.messages.length,
+        summary: summaryContent
+      };
+    } catch (error) {
+      return {
+        success: false,
+        messagesBefore: messageCount,
+        messagesAfter: messageCount
+      };
+    }
+  }
+
+  /**
    * Clean up resources
    */
   destroy(): void {
