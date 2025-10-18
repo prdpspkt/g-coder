@@ -53,7 +53,7 @@ export class Renderer {
   }
 
   renderToolCall(toolName: string, params: Record<string, any>): string {
-    const header = chalk.cyan.bold(`\n🔧 Tool: ${toolName}`);
+    //    const header = chalk.cyan.bold(`\n🔧 Tool: ${toolName}`);
     const paramsStr = Object.entries(params)
       .map(([key, value]) => {
         const displayValue = typeof value === 'string' && value.length > 100
@@ -63,7 +63,7 @@ export class Renderer {
       })
       .join('\n');
 
-    return `${header}\n${paramsStr}`;
+    return `${paramsStr}`;
   }
 
   renderToolResult(toolName: string, success: boolean, output?: string, error?: string, data?: any): string {
