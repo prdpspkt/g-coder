@@ -53,7 +53,7 @@ export class Renderer {
   }
 
   renderToolCall(toolName: string, params: Record<string, any>): string {
-    const header = chalk.cyan.bold(`\n🔧 Tool: ${toolName}`);
+    //    const header = chalk.cyan.bold(`\n🔧 Tool: ${toolName}`);
     const paramsStr = Object.entries(params)
       .map(([key, value]) => {
         const displayValue = typeof value === 'string' && value.length > 100
@@ -63,7 +63,7 @@ export class Renderer {
       })
       .join('\n');
 
-    return `${header}\n${paramsStr}`;
+    return `${paramsStr}`;
   }
 
   renderToolResult(toolName: string, success: boolean, output?: string, error?: string, data?: any): string {
@@ -184,6 +184,50 @@ export class Renderer {
 
   renderPrompt(): string {
     return chalk.green.bold('> ');
+  }
+
+  renderStatusBar(options: {
+    model: string;
+    provider: string;
+    planMode?: boolean;
+    bossMode?: boolean;
+    multiLineMode?: boolean;
+    tokenCount?: number;
+    maxTokens?: number;
+  }): string {
+    const parts: string[] = [];
+
+    // Model and provider
+    parts.push(chalk.cyan(`${options.provider}:${options.model}`));
+
+    // Token usage if available
+    if (options.tokenCount !== undefined && options.maxTokens) {
+      const percentage = Math.round((options.tokenCount / options.maxTokens) * 100);
+      const color = percentage > 90 ? chalk.red : percentage > 70 ? chalk.yellow : chalk.gray;
+      parts.push(color(`${options.tokenCount}/${options.maxTokens} tokens (${percentage}%)`));
+    }
+
+    // Mode indicators
+    const modes: string[] = [];
+    if (options.bossMode) {
+      modes.push(chalk.bold.red('BOSS'));
+    }
+    if (options.planMode) {
+      modes.push(chalk.yellow('PLAN'));
+    }
+    if (options.multiLineMode) {
+      modes.push(chalk.blue('MULTI-LINE'));
+    }
+
+    if (modes.length > 0) {
+      parts.push(`[${modes.join(' ')}]`);
+    }
+
+    // Join all parts with separator
+    const statusLine = parts.join(chalk.gray(' │ '));
+
+    // Return with proper formatting
+    return chalk.gray('─'.repeat(80)) + '\n' + statusLine;
   }
 
   renderStreaming(partial: string): void {
