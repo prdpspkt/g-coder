@@ -95,7 +95,11 @@ export class ConfigManager {
         }
 
         // Remove control characters (except newlines and tabs that are valid in JSON)
-        const cleanedContent = fileContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        let cleanedContent = fileContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+        // Log diagnostics
+        logger.debug(`Original length: ${fileContent.length}, Cleaned length: ${cleanedContent.length}`);
+        logger.debug(`Removed ${fileContent.length - cleanedContent.length} control characters`);
 
         // Try parsing again
         try {
@@ -113,12 +117,14 @@ export class ConfigManager {
         } catch (secondError: any) {
           const errorMsg = `Failed to parse config.json even after removing control characters.\n\n` +
             `Original error: ${parseError.message}\n` +
+            `After cleanup error: ${secondError.message}\n` +
             `Backup saved at: ${backupPath}\n\n` +
             `📝 Recovery steps:\n` +
-            `  1. Check your config.json syntax at: ${CONFIG_FILE}\n` +
-            `  2. Restore from backup: ${backupPath}\n` +
-            `  3. Or delete the file to create a fresh config\n` +
-            `  4. Use a JSON validator online to check the syntax`;
+            `  1. View backup: cat ${backupPath}\n` +
+            `  2. Check cleaned content: cat ${CONFIG_FILE}\n` +
+            `  3. Restore from backup: cp ${backupPath} ${CONFIG_FILE}\n` +
+            `  4. Or create fresh config from template\n` +
+            `  5. Verify JSON syntax: cat ${CONFIG_FILE} | python -m json.tool`;
           logger.error(errorMsg);
           throw new ConfigError('load configuration', new Error(errorMsg));
         }
