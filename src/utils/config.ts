@@ -55,78 +55,90 @@ export class ConfigManager {
   }
 
   private loadConfig(): Config {
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+
+    // Always require config file to exist
+    if (!fs.existsSync(CONFIG_FILE)) {
+      const error = new Error(`Configuration file not found: ${CONFIG_FILE}\nPlease create a config.json file in ${CONFIG_DIR}`);
+      logger.error(error.message);
+      throw new ConfigError('load configuration', error);
+    }
+
+    // Load from config file only
+    let fileContent: string;
     try {
-      if (!fs.existsSync(CONFIG_DIR)) {
-        fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      }
+      fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+    } catch (readError: any) {
+      const error = new Error(`Cannot read config file: ${readError.message}`);
+      logger.error(error.message);
+      throw new ConfigError('load configuration', error);
+    }
 
-      // Always require config file to exist
-      if (!fs.existsSync(CONFIG_FILE)) {
-        throw new Error(`Configuration file not found: ${CONFIG_FILE}\nPlease create a config.json file in ${CONFIG_DIR}`);
-      }
+    // Try to parse, and if it fails due to control characters, attempt to fix
+    let config: Config;
+    try {
+      config = JSON.parse(fileContent) as Config;
+    } catch (parseError: any) {
+      // Check if it's a control character error
+      if (parseError.message && parseError.message.includes('control character')) {
+        logger.warn('Detected control characters in config.json, attempting to fix...');
 
-      // Load from config file only
-      let fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-
-      // Try to parse, and if it fails due to control characters, attempt to fix
-      let config: Config;
-      try {
-        config = JSON.parse(fileContent) as Config;
-      } catch (parseError: any) {
-        // Check if it's a control character error
-        if (parseError.message && parseError.message.includes('control character')) {
-          logger.warn('Detected control characters in config.json, attempting to fix...');
-
-          // Backup the corrupted file
-          const backupPath = CONFIG_FILE + '.backup.' + Date.now();
+        // Backup the corrupted file
+        const backupPath = CONFIG_FILE + '.backup.' + Date.now();
+        try {
           fs.writeFileSync(backupPath, fileContent);
           logger.info(`Created backup at: ${backupPath}`);
+        } catch (backupError) {
+          logger.warn(`Failed to create backup: ${backupError}`);
+        }
 
-          // Remove control characters (except newlines and tabs that are valid in JSON)
-          fileContent = fileContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        // Remove control characters (except newlines and tabs that are valid in JSON)
+        const cleanedContent = fileContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-          // Try parsing again
+        // Try parsing again
+        try {
+          config = JSON.parse(cleanedContent) as Config;
+          logger.info('Successfully fixed and parsed config.json');
+
+          // Save the fixed version
           try {
-            config = JSON.parse(fileContent) as Config;
-            logger.info('Successfully fixed and parsed config.json');
-
-            // Save the fixed version
             fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
             logger.info('Saved fixed config.json');
-          } catch (secondError: any) {
-            throw new Error(
-              `Failed to parse config.json even after removing control characters.\n\n` +
-              `Original error: ${parseError.message}\n` +
-              `Backup saved at: ${backupPath}\n\n` +
-              `Please manually edit ${CONFIG_FILE} or restore from a backup.\n` +
-              `You can also delete it to create a new default config.`
-            );
+          } catch (saveError) {
+            logger.warn(`Fixed config but could not save: ${saveError}`);
+            // Continue anyway - we have the parsed config
           }
-        } else {
-          throw parseError;
+        } catch (secondError: any) {
+          const errorMsg = `Failed to parse config.json even after removing control characters.\n\n` +
+            `Original error: ${parseError.message}\n` +
+            `Backup saved at: ${backupPath}\n\n` +
+            `📝 Recovery steps:\n` +
+            `  1. Check your config.json syntax at: ${CONFIG_FILE}\n` +
+            `  2. Restore from backup: ${backupPath}\n` +
+            `  3. Or delete the file to create a fresh config\n` +
+            `  4. Use a JSON validator online to check the syntax`;
+          logger.error(errorMsg);
+          throw new ConfigError('load configuration', new Error(errorMsg));
         }
-      }
-
-      // Override with environment variables (only for API keys)
-      config = this.applyEnvVariables(config);
-
-      return config;
-    } catch (error: any) {
-      // Provide helpful error message with recovery instructions
-      let errorMsg = error.message || String(error);
-
-      if (errorMsg.includes('JSON')) {
-        errorMsg += `\n\n📝 Recovery steps:\n` +
+      } else {
+        // Other JSON parse error
+        const errorMsg = `Invalid JSON in config.json: ${parseError.message}\n\n` +
+          `📝 Recovery steps:\n` +
           `  1. Check your config.json syntax at: ${CONFIG_FILE}\n` +
           `  2. Look for backup files: ${CONFIG_FILE}.backup.*\n` +
           `  3. Or delete the file to create a fresh config\n` +
-          `  4. You can also use a JSON validator online to check the syntax`;
+          `  4. Use a JSON validator online to check the syntax`;
+        logger.error(errorMsg);
+        throw new ConfigError('load configuration', new Error(errorMsg));
       }
-
-      const configError = new ConfigError('load configuration', new Error(errorMsg));
-      logger.error(configError.message);
-      throw configError;
     }
+
+    // Override with environment variables (only for API keys)
+    config = this.applyEnvVariables(config);
+
+    return config;
   }
 
   private applyEnvVariables(config: Config): Config {
