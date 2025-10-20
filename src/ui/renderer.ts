@@ -183,7 +183,15 @@ export class Renderer {
   }
 
   renderPrompt(): string {
-    return chalk.green.bold('> ');
+    return chalk.green.bold('┌─ ') + chalk.cyan('Enter your message ') + chalk.gray('(paste code, errors, or long text - submit with Enter or double-Enter)') + '\n' + chalk.green.bold('│ ');
+  }
+
+  renderMultiLinePrompt(): string {
+    return chalk.green.bold('│ ');
+  }
+
+  renderMultiLineEnd(): string {
+    return chalk.green.bold('└─ ') + chalk.gray('(press Enter on empty line to submit)');
   }
 
   renderStatusBar(options: {

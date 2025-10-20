@@ -8,6 +8,8 @@ export interface FileArtifact {
   content: string;
   language?: string;
   action: 'create' | 'update';
+  complete?: boolean; // Whether the code block is closed
+  contentHash?: string; // Hash to detect changes
 }
 
 export class ArtifactParser {
@@ -18,13 +20,14 @@ export class ArtifactParser {
   parseArtifacts(response: string): FileArtifact[] {
     const artifacts: FileArtifact[] = [];
 
-    logger.info('Parsing response for artifacts...');
+    // Use debug instead of info to reduce noise during streaming
+    logger.debug('Parsing response for artifacts...');
     logger.debug(`Response length: ${response.length} chars`);
 
     // Split response by ``` markers to properly handle nested backticks
     const blocks = this.extractCodeBlocks(response);
 
-    logger.info(`Found ${blocks.length} code block(s)`);
+    logger.debug(`Found ${blocks.length} code block(s)`);
 
     for (const block of blocks) {
       // Check if block header contains a file path
@@ -45,26 +48,34 @@ export class ArtifactParser {
         const resolvedPath = path.resolve(filePath);
         const action = fs.existsSync(resolvedPath) ? 'update' : 'create';
 
-        logger.info(`Found artifact: ${filePath} (${content.length} chars)`);
+        // Create a simple hash based on file path and content length
+        const contentHash = `${filePath}:${content.length}`;
+
+        // Use debug for all artifact detection - streaming executor will log when queued
+        logger.debug(`Found ${block.complete ? 'complete' : 'incomplete'} artifact: ${filePath} (${content.length} chars)`);
 
         artifacts.push({
           filePath,
           content,
           language,
           action,
+          complete: block.complete,
+          contentHash,
         });
       }
     }
 
-    logger.info(`Parsed ${artifacts.length} artifact(s)`);
+    // Debug logging only
+    const completeCount = artifacts.filter(a => a.complete).length;
+    logger.debug(`Parsed ${artifacts.length} artifact(s) (${completeCount} complete)`);
     return artifacts;
   }
 
   /**
    * Extract code blocks from response by properly handling ``` markers
    */
-  private extractCodeBlocks(response: string): Array<{ header: string; content: string }> {
-    const blocks: Array<{ header: string; content: string }> = [];
+  private extractCodeBlocks(response: string): Array<{ header: string; content: string; complete: boolean }> {
+    const blocks: Array<{ header: string; content: string; complete: boolean }> = [];
     const lines = response.split('\n');
 
     let inBlock = false;
@@ -86,6 +97,7 @@ export class ArtifactParser {
           blocks.push({
             header: currentHeader,
             content: currentContent.join('\n'),
+            complete: true, // Block is closed
           });
           currentHeader = '';
           currentContent = [];
@@ -95,12 +107,14 @@ export class ArtifactParser {
       }
     }
 
-    // Handle unclosed block
+    // Handle unclosed block - mark as incomplete
     if (inBlock && currentContent.length > 0) {
-      logger.warn('Found unclosed code block - file may be incomplete');
+      // Use debug instead of warn to reduce noise during streaming
+      logger.debug('Found unclosed code block - streaming in progress');
       blocks.push({
         header: currentHeader,
         content: currentContent.join('\n'),
+        complete: false, // Block is still open
       });
     }
 

@@ -14,6 +14,7 @@ import {ApprovalManager} from './utils/approval';
 import {PlatformDetector} from './utils/platform';
 import {ProjectScanner} from './utils/project-scanner';
 import {ConversationHistoryManager} from './utils/history';
+import {StreamingExecutor} from './utils/streaming-executor';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -35,6 +36,7 @@ export class CLI {
     private codeBlockMarker: string = '';
     private bossMode: boolean = false;
     private shouldStopExecution: boolean = false;
+    private streamingExecutor: StreamingExecutor;
 
     constructor() {
         const config = configManager.get();
@@ -63,10 +65,14 @@ export class CLI {
         // Initialize conversation history manager
         this.historyManager = new ConversationHistoryManager();
 
+        // Initialize streaming executor
+        this.streamingExecutor = new StreamingExecutor(this.approvalManager);
+
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout,
             prompt: renderer.renderPrompt(),
+            terminal: true,
         });
     }
 
@@ -145,7 +151,10 @@ export class CLI {
         }
 
         console.log(renderer.renderInfo('Type "exit" to quit, "/help" for commands'));
-        console.log(chalk.gray('Tip: Paste multi-line code/errors naturally - submit with double Enter\n'));
+        console.log(chalk.cyan('\n💡 Input Tips:'));
+        console.log(chalk.gray('  • Just type or paste anything and press Enter - works for single or multi-line'));
+        console.log(chalk.gray('  • Paste multi-line code/errors directly - detected automatically'));
+        console.log(chalk.gray('  • Interrupt: Press Ctrl+C to cancel current operation\n'));
 
         this.setupHandlers();
         this.promptWithStatus();
@@ -178,13 +187,41 @@ export class CLI {
     }
 
     private setupHandlers(): void {
+        // Handle raw paste events (before readline processes them)
+        let pendingPaste = '';
+
+        // Listen to stdin for paste detection
+        process.stdin.on('data', (chunk) => {
+            const data = chunk.toString();
+            // If data contains newlines, it's likely a paste
+            if (data.includes('\n') && data.split('\n').length > 2) {
+                pendingPaste = data;
+            }
+        });
+
         this.rl.on('line', async (input: string) => {
+            // Check if we have pending pasted content
+            if (pendingPaste) {
+                const pastedText = pendingPaste.trim();
+                pendingPaste = '';
+
+                if (pastedText) {
+                    console.log(chalk.cyan(`\n📋 Pasted ${pastedText.split('\n').length} lines - processing...\n`));
+                    await this.processUserInput(pastedText);
+                    this.promptWithStatus();
+                    return;
+                }
+            }
+
             const trimmed = input.trim();
 
             // If in multi-line mode
             if (this.isMultiLineMode) {
                 // Check for empty line to submit (double Enter)
                 if (trimmed === '') {
+                    // Show closing box
+                    console.log(renderer.renderMultiLineEnd());
+
                     // Submit the buffered input
                     this.isMultiLineMode = false;
                     const multiLineInput = this.multiLineBuffer.join('\n');
@@ -192,6 +229,7 @@ export class CLI {
                     this.rl.setPrompt(renderer.renderPrompt());
 
                     if (multiLineInput.trim()) {
+                        console.log(chalk.cyan(`\n📝 Submitting ${multiLineInput.split('\n').length} lines...\n`));
                         await this.processUserInput(multiLineInput);
                     }
                     this.promptWithStatus();
@@ -200,6 +238,7 @@ export class CLI {
 
                 // Accumulate the line
                 this.multiLineBuffer.push(input);
+                this.rl.setPrompt(renderer.renderMultiLinePrompt());
                 this.rl.prompt();
                 return;
             }
@@ -231,16 +270,7 @@ export class CLI {
                 process.exit(0);
             }
 
-            // Check if input looks incomplete and should trigger multi-line mode
-            if (this.shouldEnterMultiLineMode(input)) {
-                this.isMultiLineMode = true;
-                this.multiLineBuffer = [input];
-                this.rl.setPrompt(chalk.gray('│ '));
-                this.rl.prompt();
-                return;
-            }
-
-            // Process single-line input
+            // Process input immediately - paste detection handles multi-line automatically
             await this.processUserInput(trimmed);
             this.promptWithStatus();
         });
@@ -249,6 +279,56 @@ export class CLI {
             console.log(renderer.renderInfo('\nGoodbye!'));
             await hookManager.trigger({event: 'session_end'});
             process.exit(0);
+        });
+
+        // Handle Ctrl+C (SIGINT) - interrupt current operation
+        let ctrlCCount = 0;
+        let ctrlCTimeout: NodeJS.Timeout | null = null;
+
+        process.on('SIGINT', async () => {
+            if (this.isProcessing) {
+                // If processing, cancel the current operation
+                console.log(chalk.yellow('\n\n⚠️  Interrupted! Stopping current operation...'));
+                this.isProcessing = false;
+                this.shouldStopExecution = true;
+                this.clearStatusLine();
+                this.multiLineBuffer = [];
+                this.isMultiLineMode = false;
+                this.rl.setPrompt(renderer.renderPrompt());
+                this.promptWithStatus();
+            } else if (this.isMultiLineMode) {
+                // If in multi-line mode, cancel it
+                console.log(chalk.yellow('\n\nMulti-line input cancelled'));
+                this.isMultiLineMode = false;
+                this.multiLineBuffer = [];
+                this.rl.setPrompt(renderer.renderPrompt());
+                this.promptWithStatus();
+            } else {
+                // If idle, exit on second Ctrl+C within 2 seconds
+                ctrlCCount++;
+
+                if (ctrlCCount === 1) {
+                    console.log(renderer.renderInfo('\nPress Ctrl+C again within 2 seconds to exit, or type "exit" to quit.'));
+                    this.promptWithStatus();
+
+                    // Reset counter after 2 seconds
+                    ctrlCTimeout = setTimeout(() => {
+                        ctrlCCount = 0;
+                    }, 2000);
+                } else if (ctrlCCount >= 2) {
+                    // Second Ctrl+C - exit
+                    if (ctrlCTimeout) clearTimeout(ctrlCTimeout);
+                    console.log(renderer.renderInfo('\nGoodbye!'));
+                    await hookManager.trigger({event: 'session_end'});
+                    process.exit(0);
+                }
+            }
+        });
+
+        // Listen for readline SIGINT event (also triggered by Ctrl+C)
+        this.rl.on('SIGINT', () => {
+            // readline handles Ctrl+C, emit through process for consistency
+            process.emit('SIGINT', 'SIGINT' as any);
         });
     }
 
@@ -403,6 +483,15 @@ export class CLI {
             }
         }
 
+        // Built-in commands list
+        const builtInCommands = [
+            'help', 'clear', 'context', 'compact', 'tools', 'commands', 'hooks',
+            'reload', 'rescan', 'history', 'model', 'provider', 'config', 'export',
+            'plan', 'approve', 'yes', 'y', 'reject', 'no', 'n',
+            'save', 'load', 'session', 'sessions', 'delete-session',
+            'approval', 'boss'
+        ];
+
         switch (cmd) {
             case 'help':
                 this.showHelp();
@@ -430,18 +519,19 @@ export class CLI {
                 console.log(toolRegistry.getDefinitions());
                 break;
 
-            case 'commands':
-                const customCommands = commandManager.getAllCommands();
-                if (customCommands.length === 0) {
+            case 'commands': {
+                const customCmds = commandManager.getAllCommands();
+                if (customCmds.length === 0) {
                     console.log(renderer.renderInfo('No custom commands found'));
                     console.log(renderer.renderInfo(`Add .md files to: ${commandManager.getCommandsDir()}`));
                 } else {
                     console.log(renderer.renderHeader('Custom Commands'));
-                    customCommands.forEach(cmd => {
+                    customCmds.forEach(cmd => {
                         console.log(chalk.yellow(`  /${cmd.name}`) + (cmd.description ? ` - ${chalk.gray(cmd.description)}` : ''));
                     });
                     console.log(chalk.gray(`\nCommands directory: ${commandManager.getCommandsDir()}`));
                 }
+            }
                 break;
 
             case 'hooks':
@@ -601,6 +691,134 @@ export class CLI {
                 }
                 break;
 
+            case 'session':
+                if (args.length === 0) {
+                    // Show current session and usage
+                    console.log(renderer.renderHeader('Session Management'));
+
+                    if (this.currentSessionId) {
+                        const currentSession = sessionManager.listSessions().find(s => s.id === this.currentSessionId);
+                        if (currentSession) {
+                            console.log(chalk.cyan('Current Session:'));
+                            console.log(`  ${chalk.yellow(currentSession.name)}`);
+                            console.log(`  ${chalk.gray(`ID: ${currentSession.id}`)}`);
+                            console.log(`  ${chalk.gray(`Messages: ${currentSession.metadata.messageCount}`)}`);
+                            console.log('');
+                        }
+                    } else {
+                        console.log(renderer.renderInfo('No active session'));
+                        console.log('');
+                    }
+
+                    console.log(chalk.cyan('Usage:'));
+                    console.log(chalk.gray('  /session list              - List all saved sessions'));
+                    console.log(chalk.gray('  /session load <name/id>    - Load a session'));
+                    console.log(chalk.gray('  /session save <name>       - Save current conversation'));
+                    console.log(chalk.gray('  /session delete <name/id>  - Delete a session'));
+                    console.log(chalk.gray('  /session clear             - Clear current session (keeps history)\n'));
+                } else {
+                    const subCmd = args[0].toLowerCase();
+                    const subArgs = args.slice(1);
+
+                    switch (subCmd) {
+                        case 'list': {
+                            const sessionList = sessionManager.listSessions();
+                            if (sessionList.length === 0) {
+                                console.log(renderer.renderInfo('No saved sessions found'));
+                            } else {
+                                console.log(renderer.renderHeader(`Saved Sessions (${sessionList.length})`));
+                                sessionList.forEach((session, index) => {
+                                    const current = session.id === this.currentSessionId ? chalk.green(' (current)') : '';
+                                    const date = new Date(session.updatedAt).toLocaleString();
+                                    console.log(`${chalk.yellow(`${index + 1}.`)} ${chalk.cyan(session.name)}${current}`);
+                                    console.log(`   ${chalk.gray(`ID: ${session.id}`)}`);
+                                    console.log(`   ${chalk.gray(`Messages: ${session.metadata.messageCount} | Updated: ${date}`)}`);
+                                    if (session.metadata.provider) {
+                                        console.log(`   ${chalk.gray(`Provider: ${session.metadata.provider} | Model: ${session.metadata.model}`)}`);
+                                    }
+                                    console.log('');
+                                });
+                            }
+                            break;
+                        }
+
+                        case 'load': {
+                            if (subArgs.length === 0) {
+                                console.log(renderer.renderError('Please provide a session name or ID'));
+                                console.log(renderer.renderInfo('Usage: /session load <session-name-or-id>'));
+                            } else {
+                                const identifier = subArgs.join(' ');
+                                const session = sessionManager.loadSession(identifier);
+                                if (session) {
+                                    this.context.clear();
+                                    session.messages.forEach(msg => {
+                                        this.context.addMessage(msg.role as 'user' | 'assistant', msg.content);
+                                    });
+                                    this.currentSessionId = session.id;
+                                    console.log(renderer.renderSuccess(`Session loaded: ${session.name}`));
+                                    console.log(renderer.renderInfo(`${session.metadata.messageCount} messages restored`));
+                                    if (session.metadata.provider) {
+                                        console.log(renderer.renderInfo(`Provider: ${session.metadata.provider}, Model: ${session.metadata.model}`));
+                                    }
+                                } else {
+                                    console.log(renderer.renderError(`Session not found: ${identifier}`));
+                                }
+                            }
+                            break;
+                        }
+
+                        case 'save': {
+                            if (subArgs.length === 0) {
+                                console.log(renderer.renderError('Please provide a session name'));
+                                console.log(renderer.renderInfo('Usage: /session save <session-name>'));
+                            } else {
+                                const sessionName = subArgs.join(' ');
+                                const messages = this.context.getMessages();
+                                const config = configManager.get();
+                                const session = sessionManager.saveSession(sessionName, messages, config.provider, config.model);
+                                this.currentSessionId = session.id;
+                                console.log(renderer.renderSuccess(`Session saved: ${session.name}`));
+                                console.log(renderer.renderInfo(`${session.metadata.messageCount} messages saved`));
+                            }
+                            break;
+                        }
+
+                        case 'delete': {
+                            if (subArgs.length === 0) {
+                                console.log(renderer.renderError('Please provide a session name or ID'));
+                                console.log(renderer.renderInfo('Usage: /session delete <session-name-or-id>'));
+                            } else {
+                                const identifier = subArgs.join(' ');
+                                if (sessionManager.deleteSession(identifier)) {
+                                    console.log(renderer.renderSuccess(`Session deleted: ${identifier}`));
+                                    if (this.currentSessionId === identifier) {
+                                        this.currentSessionId = null;
+                                    }
+                                } else {
+                                    console.log(renderer.renderError(`Session not found: ${identifier}`));
+                                }
+                            }
+                            break;
+                        }
+
+                        case 'clear': {
+                            console.log(renderer.renderWarning('Clearing current session context...'));
+                            const contextSize = this.context.getContextSize();
+                            this.context.clear();
+                            this.currentSessionId = null;
+                            console.log(renderer.renderSuccess(`Session cleared (${contextSize} messages removed)`));
+                            console.log(renderer.renderInfo('Note: Conversation history in project files is preserved'));
+                            console.log(renderer.renderInfo('Use /history clear to remove project history'));
+                            break;
+                        }
+
+                        default:
+                            console.log(renderer.renderError(`Unknown session subcommand: ${subCmd}`));
+                            console.log(renderer.renderInfo('Use: list, load, save, delete, or clear'));
+                    }
+                }
+                break;
+
             case 'sessions':
                 const sessions = sessionManager.listSessions();
                 if (sessions.length === 0) {
@@ -756,10 +974,11 @@ export class CLI {
 
             case 'boss':
                 this.bossMode = !this.bossMode;
+                this.streamingExecutor.setBossMode(this.bossMode);
                 if (this.bossMode) {
                     console.log(chalk.bold.red('🔥 BOSS MODE ENABLED 🔥'));
                     console.log(chalk.yellow('All approval requirements bypassed'));
-                    console.log(chalk.yellow('Tools will execute without confirmation'));
+                    console.log(chalk.yellow('Tools will execute without confirmation (including parallel execution)'));
                     console.log(chalk.gray('Use with caution - type /boss again to disable'));
                 } else {
                     console.log(chalk.green('✓ Boss mode disabled'));
@@ -808,10 +1027,108 @@ export class CLI {
             }
                 break;
 
-            default:
-                console.log(renderer.renderError(`Unknown command: ${cmd}`));
-                console.log(renderer.renderInfo('Type /help for available commands'));
+            default: {
+                console.log(renderer.renderError(`Unknown command: /${cmd}`));
+
+                // Get all available commands (built-in + custom)
+                const customCmdList = commandManager.getAllCommands().map(c => c.name);
+                const allCommands = [...builtInCommands, ...customCmdList];
+
+                // Find similar commands using simple string matching
+                const suggestions = this.findSimilarCommands(cmd, allCommands);
+
+                if (suggestions.length > 0) {
+                    console.log(chalk.cyan('\n💡 Did you mean:'));
+                    suggestions.slice(0, 5).forEach(suggestion => {
+                        console.log(chalk.yellow(`  /${suggestion}`));
+                    });
+                    console.log('');
+                } else {
+                    console.log(chalk.gray('\nAvailable commands:'));
+                    console.log(chalk.yellow('  Built-in: ') + builtInCommands.slice(0, 10).map(c => `/${c}`).join(', ') + '...');
+                    if (customCmdList.length > 0) {
+                        console.log(chalk.yellow('  Custom: ') + customCmdList.map(c => `/${c}`).join(', '));
+                    }
+                    console.log('');
+                }
+
+                console.log(renderer.renderInfo('Type /help for detailed command list'));
+            }
         }
+    }
+
+    /**
+     * Find similar commands using fuzzy matching
+     */
+    private findSimilarCommands(input: string, commands: string[]): string[] {
+        const inputLower = input.toLowerCase();
+
+        // Calculate similarity scores
+        const scored = commands.map(cmd => ({
+            cmd,
+            score: this.calculateSimilarity(inputLower, cmd.toLowerCase())
+        }));
+
+        // Filter and sort by score
+        return scored
+            .filter(item => item.score > 0.3) // Threshold for suggestions
+            .sort((a, b) => b.score - a.score)
+            .map(item => item.cmd);
+    }
+
+    /**
+     * Calculate similarity between two strings (0-1)
+     */
+    private calculateSimilarity(str1: string, str2: string): number {
+        // Exact match
+        if (str1 === str2) return 1;
+
+        // Starts with
+        if (str2.startsWith(str1)) return 0.9;
+
+        // Contains
+        if (str2.includes(str1)) return 0.7;
+
+        // Levenshtein distance-based similarity
+        const distance = this.levenshteinDistance(str1, str2);
+        const maxLength = Math.max(str1.length, str2.length);
+
+        if (maxLength === 0) return 1;
+
+        return 1 - (distance / maxLength);
+    }
+
+    /**
+     * Calculate Levenshtein distance between two strings
+     */
+    private levenshteinDistance(str1: string, str2: string): number {
+        const matrix: number[][] = [];
+
+        // Initialize matrix
+        for (let i = 0; i <= str2.length; i++) {
+            matrix[i] = [i];
+        }
+
+        for (let j = 0; j <= str1.length; j++) {
+            matrix[0][j] = j;
+        }
+
+        // Fill matrix
+        for (let i = 1; i <= str2.length; i++) {
+            for (let j = 1; j <= str1.length; j++) {
+                if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1, // substitution
+                        matrix[i][j - 1] + 1,     // insertion
+                        matrix[i - 1][j] + 1      // deletion
+                    );
+                }
+            }
+        }
+
+        return matrix[str2.length][str1.length];
     }
 
     private showHelp(): void {
@@ -840,18 +1157,32 @@ ${chalk.cyan.bold('Commands:')}
   ${chalk.yellow('exit')} or ${chalk.yellow('quit')} - Exit the application
 
 ${chalk.cyan.bold('Session Management:')}
+  ${chalk.yellow('/session')}              - Show current session and management options
+  ${chalk.yellow('/session list')}         - List all saved sessions
+  ${chalk.yellow('/session load <name>')}  - Load a session
+  ${chalk.yellow('/session save <name>')}  - Save current conversation
+  ${chalk.yellow('/session delete <name>')} - Delete a session
+  ${chalk.yellow('/session clear')}        - Clear current session (keeps history)
+
+  ${chalk.gray('Legacy commands (still supported):')}
   ${chalk.yellow('/save <name>')}         - Save current conversation
   ${chalk.yellow('/load <name-or-id>')}   - Load a saved session
   ${chalk.yellow('/sessions')}            - List all saved sessions
   ${chalk.yellow('/delete-session <name-or-id>')} - Delete a session
 
-${chalk.cyan.bold('Multi-line Input:')}
-  Automatically enters multi-line mode when pasting:
+${chalk.cyan.bold('Input Methods:')}
+  ${chalk.green('Paste Detection:')} Automatically detects and handles pasted content
+  - Paste multi-line code, error messages, or logs directly
+  - Works with any text length - no special formatting needed
+
+  ${chalk.green('Multi-line Mode:')} Triggered automatically for:
   - Code blocks starting with ${chalk.yellow('```')}
   - Error traces and stack traces
   - Code with unclosed brackets/braces
   - Lines ending with continuation characters (comma, colon, etc.)
-  ${chalk.gray('Submit multi-line input:')} Press ${chalk.yellow('Enter')} twice (empty line)
+  ${chalk.gray('Submit:')} Press ${chalk.yellow('Enter')} on empty line (double-Enter)
+
+  ${chalk.green('Single-line:')} For short messages, just type and press ${chalk.yellow('Enter')}
 
 ${chalk.cyan.bold('Providers:')}
   ${chalk.green('ollama')}       - Local Ollama models (default)
@@ -938,8 +1269,12 @@ ${chalk.cyan.bold('Examples:')}
             this.updateStatus('AI is thinking...');
             const thinkingSpinner = ora('AI is processing your request...').start();
 
-            // Stream response from provider (silent, no console output)
+            // Reset streaming executor for new request
+            this.streamingExecutor.reset();
+
+            // Stream response from provider with real-time detection
             let fullResponse = '';
+            let streamBuffer = '';
             let toolCalls: Array<{ name: string; params: Record<string, any> }> = [];
 
             // Check if provider supports native tool calling
@@ -956,8 +1291,15 @@ ${chalk.cyan.bold('Examples:')}
 
                 const response = await this.provider.chat(
                     messages,
-                    () => {
-                        // Silent - no streaming output
+                    (chunk: string) => {
+                        // Real-time streaming detection
+                        const { detectedItems, updatedBuffer } = this.streamingExecutor.parseStreamingChunk(chunk, streamBuffer);
+                        streamBuffer = updatedBuffer;
+
+                        // Queue detected tasks for sequential execution
+                        for (const task of detectedItems) {
+                            this.streamingExecutor.queueTask(task);
+                        }
                     },
                     providerTools
                 );
@@ -970,37 +1312,35 @@ ${chalk.cyan.bold('Examples:')}
                 }
             } else {
                 // Fallback to regex parsing for providers without native support (like Ollama)
-                fullResponse = await this.provider.chat(messages, () => {
-                    // Silent - no streaming output
+                fullResponse = await this.provider.chat(messages, (chunk: string) => {
+                    // Real-time streaming detection for non-native providers
+                    const { detectedItems, updatedBuffer } = this.streamingExecutor.parseStreamingChunk(chunk, streamBuffer);
+                    streamBuffer = updatedBuffer;
+
+                    // Queue detected tasks for sequential execution
+                    for (const task of detectedItems) {
+                        this.streamingExecutor.queueTask(task);
+                    }
                 }) as string;
 
-                // Parse tool calls from response text
+                // Parse tool calls from response text (final check)
                 toolCalls = this.parseToolCalls(fullResponse);
             }
 
             thinkingSpinner.succeed('AI response received');
 
+            // Wait for all queued tasks to complete
+            await this.streamingExecutor.waitForAll();
+
+            // Display execution summary
+            if (this.streamingExecutor.getTasks().length > 0) {
+                this.streamingExecutor.displayStatus();
+            }
+
             // Log full response for debugging
             logger.debug('=== Full AI Response ===');
             logger.debug(fullResponse);
             logger.debug('=== End AI Response ===');
-
-            // FIRST: Detect and write file artifacts from AI response
-            const artifacts = artifactParser.parseArtifacts(fullResponse);
-            if (artifacts.length > 0) {
-                console.log(chalk.cyan(`\n📦 Detected ${artifacts.length} file artifact(s), writing to disk...\n`));
-                const artifactResult = await artifactParser.writeArtifacts(artifacts);
-
-                if (artifactResult.written > 0) {
-                    // Add summary to context so AI knows files were created
-                    const artifactSummary = `Created ${artifactResult.written} file(s): ${artifacts.map(a => a.filePath).join(', ')}`;
-                    logger.info(artifactSummary);
-                }
-
-                if (artifactResult.errors.length > 0) {
-                    console.log(renderer.renderWarning(`${artifactResult.errors.length} file(s) failed to write`));
-                }
-            }
 
             // Plan mode: if tools detected and plan mode is on, ask for approval
             if (this.planMode && toolCalls.length > 0) {

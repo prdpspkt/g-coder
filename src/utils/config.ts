@@ -66,15 +66,64 @@ export class ConfigManager {
       }
 
       // Load from config file only
-      const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      let config = JSON.parse(fileContent) as Config;
+      let fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+
+      // Try to parse, and if it fails due to control characters, attempt to fix
+      let config: Config;
+      try {
+        config = JSON.parse(fileContent) as Config;
+      } catch (parseError: any) {
+        // Check if it's a control character error
+        if (parseError.message && parseError.message.includes('control character')) {
+          logger.warn('Detected control characters in config.json, attempting to fix...');
+
+          // Backup the corrupted file
+          const backupPath = CONFIG_FILE + '.backup.' + Date.now();
+          fs.writeFileSync(backupPath, fileContent);
+          logger.info(`Created backup at: ${backupPath}`);
+
+          // Remove control characters (except newlines and tabs that are valid in JSON)
+          fileContent = fileContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+          // Try parsing again
+          try {
+            config = JSON.parse(fileContent) as Config;
+            logger.info('Successfully fixed and parsed config.json');
+
+            // Save the fixed version
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+            logger.info('Saved fixed config.json');
+          } catch (secondError: any) {
+            throw new Error(
+              `Failed to parse config.json even after removing control characters.\n\n` +
+              `Original error: ${parseError.message}\n` +
+              `Backup saved at: ${backupPath}\n\n` +
+              `Please manually edit ${CONFIG_FILE} or restore from a backup.\n` +
+              `You can also delete it to create a new default config.`
+            );
+          }
+        } else {
+          throw parseError;
+        }
+      }
 
       // Override with environment variables (only for API keys)
       config = this.applyEnvVariables(config);
 
       return config;
-    } catch (error) {
-      const configError = new ConfigError('load configuration', error);
+    } catch (error: any) {
+      // Provide helpful error message with recovery instructions
+      let errorMsg = error.message || String(error);
+
+      if (errorMsg.includes('JSON')) {
+        errorMsg += `\n\n📝 Recovery steps:\n` +
+          `  1. Check your config.json syntax at: ${CONFIG_FILE}\n` +
+          `  2. Look for backup files: ${CONFIG_FILE}.backup.*\n` +
+          `  3. Or delete the file to create a fresh config\n` +
+          `  4. You can also use a JSON validator online to check the syntax`;
+      }
+
+      const configError = new ConfigError('load configuration', new Error(errorMsg));
       logger.error(configError.message);
       throw configError;
     }

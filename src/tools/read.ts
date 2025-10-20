@@ -6,12 +6,12 @@ import { logger } from '../utils/logger';
 export class ReadTool implements Tool {
   definition: ToolDefinition = {
     name: 'Read',
-    description: 'Reads the contents of a file from the filesystem',
+    description: 'Reads the contents of a FILE from the filesystem. For directories, use Glob (find files) or Bash (list contents).',
     parameters: [
       {
         name: 'file_path',
         type: 'string',
-        description: 'The path to the file to read',
+        description: 'The path to the file to read (must be a file, not a directory)',
         required: true,
       },
       {
@@ -53,7 +53,7 @@ export class ReadTool implements Tool {
       if (stats.isDirectory()) {
         return {
           success: false,
-          error: `Path is a directory, not a file: ${resolvedPath}`,
+          error: `Path is a directory, not a file: ${resolvedPath}\n\nTo work with directories, use:\n  • Glob tool - to find files matching patterns (e.g., "*.css", "**/*.ts")\n  • Bash tool - to list directory contents (e.g., "ls ${resolvedPath}" or "dir ${resolvedPath}")`,
         };
       }
 
