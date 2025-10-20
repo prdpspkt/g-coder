@@ -7,71 +7,57 @@ import { logger } from '../utils/logger';
 
 export class ProviderFactory {
   static create(config: ProviderConfig): AIProvider {
-    switch (config.type) {
-      case 'ollama':
-        return new OllamaProvider(
-          config.baseUrl || 'http://localhost:11434',
-          config.model
-        );
-
-      case 'openai':
-        if (!config.apiKey) {
-          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
-          throw new Error(
-            `OpenAI API key is required.\n\n` +
-            `Add your API key to: ${envPath}\n` +
-            `Example: OPENAI_API_KEY=your-key-here\n\n` +
-            `Or set environment variable:\n` +
-            `export OPENAI_API_KEY=your-key-here`
-          );
-        }
-        return new OpenAIProvider(
-          config.apiKey,
-          config.model,
-          config.temperature,
-          config.maxTokens
-        );
-
-      case 'anthropic':
-        if (!config.apiKey) {
-          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
-          throw new Error(
-            `Anthropic API key is required.\n\n` +
-            `Add your API key to: ${envPath}\n` +
-            `Example: ANTHROPIC_API_KEY=your-key-here\n\n` +
-            `Or set environment variable:\n` +
-            `export ANTHROPIC_API_KEY=your-key-here`
-          );
-        }
-        return new AnthropicProvider(
-          config.apiKey,
-          config.model,
-          config.temperature,
-          config.maxTokens
-        );
-
-      case 'deepseek':
-        if (!config.apiKey) {
-          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
-          throw new Error(
-            `DeepSeek API key is required.\n\n` +
-            `Add your API key to: ${envPath}\n` +
-            `Example: DEEPSEEK_API_KEY=your-key-here\n\n` +
-            `Or set environment variable:\n` +
-            `export DEEPSEEK_API_KEY=your-key-here`
-          );
-        }
-        return new DeepSeekProvider(
-          config.apiKey,
-          config.model,
-          config.temperature,
-          config.maxTokens
-        );
-
-      default:
-        logger.error(`Unknown provider type: ${config.type}`);
-        throw new Error(`Unknown provider type: ${config.type}`);
+    // Ollama uses its own provider (no API key needed)
+    if (config.type === 'ollama') {
+      return new OllamaProvider(
+        config.baseUrl || 'http://localhost:11434',
+        config.model
+      );
     }
+
+    // Anthropic uses its own API format (not OpenAI-compatible)
+    if (config.type === 'anthropic') {
+      if (!config.apiKey) {
+        const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
+        throw new Error(
+          `Anthropic API key is required.\n\n` +
+          `Add your API key to: ${envPath}\n` +
+          `Example: ANTHROPIC_API_KEY=your-key-here\n\n` +
+          `Or set environment variable:\n` +
+          `export ANTHROPIC_API_KEY=your-key-here`
+        );
+      }
+      return new AnthropicProvider(
+        config.apiKey,
+        config.model,
+        config.temperature,
+        config.maxTokens
+      );
+    }
+
+    // All other providers use OpenAI-compatible API
+    // (OpenAI, DeepSeek, Groq, Together, custom providers, etc.)
+    if (!config.apiKey) {
+      const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
+      throw new Error(
+        `API key is required for provider "${config.type}".\n\n` +
+        `Add your API key to: ${envPath}\n` +
+        `Example: ${config.type.toUpperCase()}_API_KEY=your-key-here\n\n` +
+        `Or set in config.json:\n` +
+        `  "apiKeyName": "${config.type.toUpperCase()}_API_KEY"\n\n` +
+        `Or set environment variable:\n` +
+        `export G_CODER_API_KEY=your-key-here`
+      );
+    }
+
+    // Use OpenAI provider for all OpenAI-compatible APIs
+    return new OpenAIProvider(
+      config.apiKey,
+      config.model,
+      config.temperature,
+      config.maxTokens,
+      config.baseUrl  // Pass custom baseUrl
+    );
   }
 
   static getDefaultModel(provider: ProviderType): string {

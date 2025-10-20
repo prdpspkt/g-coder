@@ -45,8 +45,8 @@ export class CLI {
         this.provider = ProviderFactory.create({
             type: config.provider,
             model: config.model,
-            apiKey: this.getApiKeyForProvider(config.provider),
-            baseUrl: config.ollamaUrl,
+            apiKey: this.getApiKeyForProvider(config.provider, config),
+            baseUrl: config.baseUrl || config.ollamaUrl,  // Use new baseUrl or legacy ollamaUrl
             temperature: config.temperature,
             maxTokens: config.maxTokens,
         });
@@ -76,7 +76,13 @@ export class CLI {
         });
     }
 
-    private getApiKeyForProvider(provider: string): string | undefined {
+    private getApiKeyForProvider(provider: string, config: any): string | undefined {
+        // First try the new generic apiKey field
+        if (config.apiKey) {
+            return config.apiKey;
+        }
+
+        // Legacy: Try provider-specific keys for backward compatibility
         switch (provider) {
             case 'openai':
                 return configManager.getApiKey('openai');

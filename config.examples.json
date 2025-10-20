@@ -1,0 +1,135 @@
+{
+  "examples": [
+    {
+      "name": "Ollama (Local, Free)",
+      "description": "Run AI models locally without any API key",
+      "config": {
+        "provider": "ollama",
+        "model": "codellama",
+        "baseUrl": "http://localhost:11434/v1",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "setup": [
+        "1. Install Ollama: https://ollama.ai/download",
+        "2. Run: ollama serve",
+        "3. Pull model: ollama pull codellama"
+      ]
+    },
+    {
+      "name": "DeepSeek",
+      "description": "Fast and affordable API",
+      "config": {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "baseUrl": "https://api.deepseek.com/v1",
+        "apiKeyName": "DEEPSEEK_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "DEEPSEEK_API_KEY": "your-deepseek-api-key-here"
+      },
+      "setup": [
+        "1. Get API key: https://platform.deepseek.com/",
+        "2. Add to ~/.g-coder/.env: DEEPSEEK_API_KEY=sk-xxx"
+      ]
+    },
+    {
+      "name": "OpenAI",
+      "description": "GPT-4 and GPT-3.5 models",
+      "config": {
+        "provider": "openai",
+        "model": "gpt-4-turbo-preview",
+        "baseUrl": "https://api.openai.com/v1",
+        "apiKeyName": "OPENAI_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "OPENAI_API_KEY": "your-openai-api-key-here"
+      },
+      "setup": [
+        "1. Get API key: https://platform.openai.com/api-keys",
+        "2. Add to ~/.g-coder/.env: OPENAI_API_KEY=sk-xxx"
+      ]
+    },
+    {
+      "name": "Anthropic Claude",
+      "description": "Claude 3.5 Sonnet and other models",
+      "config": {
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet-20241022",
+        "baseUrl": "https://api.anthropic.com/v1",
+        "apiKeyName": "ANTHROPIC_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "ANTHROPIC_API_KEY": "your-anthropic-api-key-here"
+      },
+      "setup": [
+        "1. Get API key: https://console.anthropic.com/",
+        "2. Add to ~/.g-coder/.env: ANTHROPIC_API_KEY=sk-ant-xxx"
+      ]
+    },
+    {
+      "name": "Groq (Fast Inference)",
+      "description": "Ultra-fast LLM inference with Llama models",
+      "config": {
+        "provider": "groq",
+        "model": "llama-3.1-70b-versatile",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "apiKeyName": "GROQ_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "GROQ_API_KEY": "your-groq-api-key-here"
+      },
+      "setup": [
+        "1. Get API key: https://console.groq.com/",
+        "2. Add to ~/.g-coder/.env: GROQ_API_KEY=gsk_xxx"
+      ]
+    },
+    {
+      "name": "Together AI",
+      "description": "Access to various open-source models",
+      "config": {
+        "provider": "together",
+        "model": "meta-llama/Llama-3-70b-chat-hf",
+        "baseUrl": "https://api.together.xyz/v1",
+        "apiKeyName": "TOGETHER_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "TOGETHER_API_KEY": "your-together-api-key-here"
+      },
+      "setup": [
+        "1. Get API key: https://api.together.xyz/",
+        "2. Add to ~/.g-coder/.env: TOGETHER_API_KEY=xxx"
+      ]
+    },
+    {
+      "name": "Custom OpenAI-Compatible",
+      "description": "Any OpenAI-compatible API endpoint",
+      "config": {
+        "provider": "custom",
+        "model": "your-model-name",
+        "baseUrl": "https://your-api-endpoint.com/v1",
+        "apiKeyName": "YOUR_CUSTOM_API_KEY",
+        "temperature": 0.7,
+        "maxTokens": 8192
+      },
+      "env": {
+        "YOUR_CUSTOM_API_KEY": "your-api-key-here"
+      },
+      "setup": [
+        "1. Set baseUrl to your API endpoint",
+        "2. Set apiKeyName to your env variable name",
+        "3. Add API key to ~/.g-coder/.env"
+      ]
+    }
+  ]
+}

@@ -22,7 +22,8 @@ class ConfigError extends Error {
 dotenv.config({ path: ENV_FILE });
 
 export interface Config {
-  provider: ProviderType;
+  // Provider can be 'ollama' or any OpenAI-compatible API
+  provider: string;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -33,7 +34,12 @@ export interface Config {
   maxMessageTokens?: number;
   enableTokenShortening?: boolean;
 
-  // Provider-specific settings
+  // Generic provider settings (works with any OpenAI-compatible API)
+  baseUrl?: string;  // API base URL (e.g., http://localhost:11434/v1, https://api.deepseek.com/v1)
+  apiKey?: string;   // Direct API key (not recommended, use apiKeyName instead)
+  apiKeyName?: string;  // Environment variable name to read API key from (e.g., "DEEPSEEK_API_KEY")
+
+  // Legacy provider-specific settings (deprecated, use baseUrl + apiKeyName instead)
   ollamaUrl?: string;
   openaiApiKey?: string;
   anthropicApiKey?: string;
@@ -43,11 +49,12 @@ export interface Config {
   approval?: ApprovalConfig;
 }
 
-// Helper function to create default config
+// Helper function to create default config (Ollama only - no API key needed)
 function createDefaultConfig(): Config {
   return {
-    provider: 'deepseek',
-    model: 'deepseek-chat',
+    provider: 'ollama',
+    model: 'codellama',
+    baseUrl: 'http://localhost:11434/v1',
     temperature: 0.7,
     maxTokens: 8192,
     maxContextTokens: 64000,
@@ -200,7 +207,13 @@ export class ConfigManager {
   }
 
   private applyEnvVariables(config: Config): Config {
-    // Check environment variables for API keys
+    // If apiKeyName is specified, read API key from that environment variable
+    if (config.apiKeyName && process.env[config.apiKeyName]) {
+      config.apiKey = process.env[config.apiKeyName];
+      logger.debug(`Loaded API key from env: ${config.apiKeyName}`);
+    }
+
+    // Legacy: Check environment variables for specific API keys (backward compatibility)
     if (process.env.OPENAI_API_KEY) {
       config.openaiApiKey = process.env.OPENAI_API_KEY;
     }
@@ -214,10 +227,16 @@ export class ConfigManager {
       config.ollamaUrl = process.env.OLLAMA_URL;
     }
     if (process.env.G_CODER_PROVIDER) {
-      config.provider = process.env.G_CODER_PROVIDER as ProviderType;
+      config.provider = process.env.G_CODER_PROVIDER;
     }
     if (process.env.G_CODER_MODEL) {
       config.model = process.env.G_CODER_MODEL;
+    }
+    if (process.env.G_CODER_BASE_URL) {
+      config.baseUrl = process.env.G_CODER_BASE_URL;
+    }
+    if (process.env.G_CODER_API_KEY) {
+      config.apiKey = process.env.G_CODER_API_KEY;
     }
 
     return config;

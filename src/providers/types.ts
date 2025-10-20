@@ -26,7 +26,8 @@ export interface AIProvider {
   listModels?(): Promise<string[]>;
 }
 
-export type ProviderType = 'ollama' | 'openai' | 'anthropic' | 'deepseek';
+// Provider type can be any string now (ollama, openai, deepseek, groq, custom, etc.)
+export type ProviderType = string;
 
 export interface ProviderConfig {
   type: ProviderType;

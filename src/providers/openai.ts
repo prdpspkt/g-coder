@@ -15,16 +15,19 @@ export class OpenAIProvider implements AIProvider {
     apiKey: string,
     model: string = 'gpt-4-turbo-preview',
     temperature: number = 0.7,
-    maxTokens: number = 4096
+    maxTokens: number = 4096,
+    baseURL?: string  // Support custom OpenAI-compatible endpoints
   ) {
     this.client = new OpenAI({
       apiKey,
+      baseURL,  // Will use default if undefined
       timeout: 600000, // 10 minutes for large file generation
       maxRetries: 2,
     });
     this.model = model;
     this.temperature = temperature;
     this.maxTokens = maxTokens;
+    logger.debug(`Initialized OpenAI provider with baseURL: ${baseURL || 'default (https://api.openai.com/v1)'}`);
   }
 
   async checkConnection(): Promise<boolean> {
