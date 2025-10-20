@@ -1,0 +1,2 @@
+1. If no provider set, no api key set, then start interactive setup.
+2. If there is a problem in the config.js file, then publish a new config.json.

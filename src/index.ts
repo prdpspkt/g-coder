@@ -7,6 +7,7 @@ import { configManager } from './utils/config';
 import { logger, LogLevel } from './utils/logger';
 import { renderer } from './ui/renderer';
 import { OllamaClient } from './ollama/client';
+import { InteractiveSetup, needsSetup } from './utils/setup';
 
 const program = new Command();
 
@@ -20,9 +21,24 @@ program
   .description('Start the interactive coding assistant')
   .option('-m, --model <model>', 'Ollama models to use:')
   .option('-v, --verbose', 'Enable verbose logging')
+  .option('--skip-setup', 'Skip interactive setup check')
   .action(async (options) => {
     if (options.verbose) {
       logger.setLevel(LogLevel.DEBUG);
+    }
+
+    // Check if setup is needed
+    if (!options.skipSetup && needsSetup()) {
+      console.log(chalk.yellow('\n⚠️  Configuration incomplete or missing API key\n'));
+      const setup = new InteractiveSetup();
+      const result = await setup.run();
+
+      if (!result.success) {
+        console.log(chalk.red('Setup failed. Please configure manually or try again.\n'));
+        process.exit(1);
+      }
+
+      console.log(chalk.cyan('Starting g-coder...\n'));
     }
 
     if (options.model) {
@@ -31,6 +47,19 @@ program
 
     const cli = new CLI();
     await cli.start();
+  });
+
+program
+  .command('setup')
+  .description('Run interactive setup wizard')
+  .action(async () => {
+    const setup = new InteractiveSetup();
+    const result = await setup.run();
+
+    if (!result.success) {
+      console.log(chalk.red('Setup failed. Please try again.\n'));
+      process.exit(1);
+    }
   });
 
 program
@@ -116,8 +145,22 @@ program
     }
   });
 
-// Default command: start
+// Default command: start with setup check
 program.action(async () => {
+  // Check if setup is needed
+  if (needsSetup()) {
+    console.log(chalk.yellow('\n⚠️  Configuration incomplete or missing API key\n'));
+    const setup = new InteractiveSetup();
+    const result = await setup.run();
+
+    if (!result.success) {
+      console.log(chalk.red('Setup failed. Please configure manually or try again.\n'));
+      process.exit(1);
+    }
+
+    console.log(chalk.cyan('Starting g-coder...\n'));
+  }
+
   const cli = new CLI();
   await cli.start();
 });

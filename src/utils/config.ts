@@ -43,9 +43,19 @@ export interface Config {
   approval?: ApprovalConfig;
 }
 
-// Helper function removed - system prompt now comes from config.json file only
-
-// Removed hardcoded defaults - all configuration must come from config.json file
+// Helper function to create default config
+function createDefaultConfig(): Config {
+  return {
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    temperature: 0.7,
+    maxTokens: 8192,
+    maxContextTokens: 64000,
+    enableTokenShortening: true,
+    systemPrompt: "You are G-Coder, a calm, precise, and technically skilled full-stack software engineer. Your purpose is to design, write, refactor, and document clean, production-grade software; perform safe file and command operations; and maintain clarity, correctness, and maintainability in all outputs. You can read, write, and edit files safely; run and analyze build, test, or migration commands; and work confidently with Django, Flask, FastAPI, GraphQL, REST, React, Next.js, Tailwind, Bootstrap, PostgreSQL, MySQL, Docker, and GitHub Actions. Always structure responses as: (1) Understanding — restate what the user wants, (2) Plan — outline your technical approach, (3) Solution — provide the code or command, (4) Notes — give brief technical remarks. Be concise, professional, and clear like a senior engineer. Confirm before major edits, avoid destructive commands, and ensure security, privacy, and correctness. You are G-Coder — a Claude-Code-style development agent that reads, writes, edits, and executes code intelligently and safely.",
+    approval: createDefaultApprovalConfig(),
+  };
+}
 
 export class ConfigManager {
   private config: Config;
@@ -59,11 +69,21 @@ export class ConfigManager {
       fs.mkdirSync(CONFIG_DIR, { recursive: true });
     }
 
-    // Always require config file to exist
+    // Create default config if file doesn't exist
     if (!fs.existsSync(CONFIG_FILE)) {
-      const error = new Error(`Configuration file not found: ${CONFIG_FILE}\nPlease create a config.json file in ${CONFIG_DIR}`);
-      logger.error(error.message);
-      throw new ConfigError('load configuration', error);
+      logger.warn(`Configuration file not found at: ${CONFIG_FILE}`);
+      logger.info('Creating default configuration...');
+
+      try {
+        const defaultConfig = createDefaultConfig();
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+        logger.info(`Created default config at: ${CONFIG_FILE}`);
+        return defaultConfig;
+      } catch (createError: any) {
+        const error = new Error(`Failed to create default config: ${createError.message}`);
+        logger.error(error.message);
+        throw new ConfigError('create configuration', error);
+      }
     }
 
     // Load from config file only
@@ -115,29 +135,61 @@ export class ConfigManager {
             // Continue anyway - we have the parsed config
           }
         } catch (secondError: any) {
-          const errorMsg = `Failed to parse config.json even after removing control characters.\n\n` +
-            `Original error: ${parseError.message}\n` +
-            `After cleanup error: ${secondError.message}\n` +
-            `Backup saved at: ${backupPath}\n\n` +
-            `📝 Recovery steps:\n` +
+          // Parsing failed even after cleanup - create fresh config
+          logger.error(`Failed to parse config.json even after removing control characters.`);
+          logger.error(`Original error: ${parseError.message}`);
+          logger.error(`After cleanup error: ${secondError.message}`);
+          logger.info(`Backup saved at: ${backupPath}`);
+          logger.warn('Creating fresh default configuration...');
+
+          try {
+            const defaultConfig = createDefaultConfig();
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+            logger.info(`✓ Created fresh config at: ${CONFIG_FILE}`);
+            logger.info(`Your old config is backed up at: ${backupPath}`);
+            return defaultConfig;
+          } catch (recreateError: any) {
+            const errorMsg = `Failed to create fresh config: ${recreateError.message}\n\n` +
+              `📝 Manual recovery needed:\n` +
+              `  1. View backup: cat ${backupPath}\n` +
+              `  2. Delete corrupt file: rm ${CONFIG_FILE}\n` +
+              `  3. Run: g-coder setup\n` +
+              `  4. Or restore from backup: cp ${backupPath} ${CONFIG_FILE}`;
+            logger.error(errorMsg);
+            throw new ConfigError('load configuration', new Error(errorMsg));
+          }
+        }
+      } else {
+        // Other JSON parse error - attempt to create fresh config
+        logger.error(`Invalid JSON in config.json: ${parseError.message}`);
+
+        // Backup the corrupted file
+        const backupPath = CONFIG_FILE + '.backup.' + Date.now();
+        try {
+          fs.writeFileSync(backupPath, fileContent);
+          logger.info(`Created backup at: ${backupPath}`);
+        } catch (backupError) {
+          logger.warn(`Failed to create backup: ${backupError}`);
+        }
+
+        logger.warn('Creating fresh default configuration...');
+
+        try {
+          const defaultConfig = createDefaultConfig();
+          fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+          logger.info(`✓ Created fresh config at: ${CONFIG_FILE}`);
+          logger.info(`Your old config is backed up at: ${backupPath}`);
+          return defaultConfig;
+        } catch (recreateError: any) {
+          const errorMsg = `Failed to create fresh config: ${recreateError.message}\n\n` +
+            `📝 Manual recovery needed:\n` +
             `  1. View backup: cat ${backupPath}\n` +
-            `  2. Check cleaned content: cat ${CONFIG_FILE}\n` +
-            `  3. Restore from backup: cp ${backupPath} ${CONFIG_FILE}\n` +
-            `  4. Or create fresh config from template\n` +
-            `  5. Verify JSON syntax: cat ${CONFIG_FILE} | python -m json.tool`;
+            `  2. Delete corrupt file: rm ${CONFIG_FILE}\n` +
+            `  3. Run: g-coder setup\n` +
+            `  4. Or restore from backup: cp ${backupPath} ${CONFIG_FILE}`;
           logger.error(errorMsg);
           throw new ConfigError('load configuration', new Error(errorMsg));
         }
-      } else {
-        // Other JSON parse error
-        const errorMsg = `Invalid JSON in config.json: ${parseError.message}\n\n` +
-          `📝 Recovery steps:\n` +
-          `  1. Check your config.json syntax at: ${CONFIG_FILE}\n` +
-          `  2. Look for backup files: ${CONFIG_FILE}.backup.*\n` +
-          `  3. Or delete the file to create a fresh config\n` +
-          `  4. Use a JSON validator online to check the syntax`;
-        logger.error(errorMsg);
-        throw new ConfigError('load configuration', new Error(errorMsg));
       }
     }
 
