@@ -54,7 +54,33 @@ g-coder start
 
 On first run, g-coder will create a configuration file at `~/.g-coder/config.json`.
 
-### 2. Choose Your Provider
+### 2. Quick Setup (Recommended)
+
+Manually create `~/.g-coder/.env`:
+
+```bash
+# For DeepSeek
+echo "DEEPSEEK_API_KEY=your-key-here" > ~/.g-coder/.env
+
+# For OpenAI
+echo "OPENAI_API_KEY=your-key-here" > ~/.g-coder/.env
+
+# For Anthropic
+echo "ANTHROPIC_API_KEY=your-key-here" > ~/.g-coder/.env
+```
+
+Or use the interactive setup script:
+
+```bash
+# If installed globally
+cd $(npm root -g)/@prdpspkt/g-coder
+node scripts/setup-api-key.js
+
+# If installed from source
+node scripts/setup-api-key.js
+```
+
+### 3. Choose Your Provider
 
 G-coder supports multiple AI providers. Choose based on your needs:
 

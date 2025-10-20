@@ -16,7 +16,14 @@ export class ProviderFactory {
 
       case 'openai':
         if (!config.apiKey) {
-          throw new Error('OpenAI API key is required');
+          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
+          throw new Error(
+            `OpenAI API key is required.\n\n` +
+            `Add your API key to: ${envPath}\n` +
+            `Example: OPENAI_API_KEY=your-key-here\n\n` +
+            `Or set environment variable:\n` +
+            `export OPENAI_API_KEY=your-key-here`
+          );
         }
         return new OpenAIProvider(
           config.apiKey,
@@ -27,7 +34,14 @@ export class ProviderFactory {
 
       case 'anthropic':
         if (!config.apiKey) {
-          throw new Error('Anthropic API key is required');
+          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
+          throw new Error(
+            `Anthropic API key is required.\n\n` +
+            `Add your API key to: ${envPath}\n` +
+            `Example: ANTHROPIC_API_KEY=your-key-here\n\n` +
+            `Or set environment variable:\n` +
+            `export ANTHROPIC_API_KEY=your-key-here`
+          );
         }
         return new AnthropicProvider(
           config.apiKey,
@@ -38,7 +52,14 @@ export class ProviderFactory {
 
       case 'deepseek':
         if (!config.apiKey) {
-          throw new Error('DeepSeek API key is required');
+          const envPath = require('path').join(require('os').homedir(), '.g-coder', '.env');
+          throw new Error(
+            `DeepSeek API key is required.\n\n` +
+            `Add your API key to: ${envPath}\n` +
+            `Example: DEEPSEEK_API_KEY=your-key-here\n\n` +
+            `Or set environment variable:\n` +
+            `export DEEPSEEK_API_KEY=your-key-here`
+          );
         }
         return new DeepSeekProvider(
           config.apiKey,
